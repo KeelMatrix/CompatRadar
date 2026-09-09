@@ -154,7 +154,7 @@ Telemetry uses `KeelMatrix.Telemetry` only after the first trustworthy stable-ve
 
 ## Support and limitations
 
-The tool targets `net8.0` and supports Windows, Linux, and macOS operations. The repository CI workflow is the cross-platform evidence gate; local validation currently covers Windows until the public workflow completes. The v1 adapters are explicit NuGet prerelease package overrides and SDK preview selection through `global.json`; runtime-only preview selection is unsupported and rejected.
+The tool targets `net8.0` and supports Windows, Linux, and macOS operations. Public CI validates the supported Windows, Linux, and macOS operations; local validation additionally covers Windows. The v1 adapters are explicit NuGet prerelease package overrides and SDK preview selection through `global.json`; runtime-only preview selection is unsupported and rejected.
 
 CompatRadar does not manage dependencies, open update pull requests, discover all dependencies, run hosted builds, provide accounts or scheduling, send notifications, support non-.NET ecosystems, generate patches, or guarantee that every future incompatibility will be predicted.
 

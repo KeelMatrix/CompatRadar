@@ -35,16 +35,15 @@ try {
 '@
     Set-Content -LiteralPath (Join-Path $fixture 'Program.cs') -Value @'
 var candidate = Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE") == "1";
-var version = Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE_VERSION") ?? "current";
 var attempt = Environment.GetEnvironmentVariable("COMPATRADAR_ATTEMPT") ?? "0";
 var behavior = File.Exists("smoke-behavior.txt") ? File.ReadAllText("smoke-behavior.txt").Trim() : "";
 if (behavior == "baseline") {
     Environment.Exit(18);
 }
-if (behavior == "flaky" && candidate && version == "9.0.120" && attempt == "1") {
+if (behavior == "flaky" && candidate && attempt == "1") {
     Environment.Exit(18);
 }
-if (behavior == "" && candidate && version == "9.0.120") {
+if (behavior == "future-break" && candidate) {
     Console.Error.WriteLine("MY_SECRET=smoke-secret-value");
     Console.Error.WriteLine("API_KEY=\"smoke-quoted-api-key\"");
     Console.Error.WriteLine("TOKEN=smoke-token-value");
@@ -73,7 +72,7 @@ if (behavior == "" && candidate && version == "9.0.120") {
     & $tool check --config (Split-Path -Leaf $config) --format json --report 'stable.json'
     if ($LASTEXITCODE -ne 0) { throw 'stable-identical package consumer smoke failed' }
 
-    (Get-Content -Raw -LiteralPath $config).Replace('"8.0.424"', '"9.0.120"') | Set-Content -LiteralPath $config
+    Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'future-break'
     $breakOutput = (& $tool check --config (Split-Path -Leaf $config) --format json --report 'break.json' 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 1) { throw 'planted future-break package consumer smoke failed' }
 
@@ -149,7 +148,7 @@ if (behavior == "" && candidate && version == "9.0.120") {
     if (Test-Path -LiteralPath $malformedReport) { throw 'wrong-typed optional feed check wrote a report' }
 
     Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'baseline'
-    $baselineConfig = $baseConfig.Replace('"8.0.424"', '"9.0.120"')
+    $baselineConfig = $baseConfig
     Set-Content -LiteralPath $config -Value $baselineConfig
     & $tool check --config (Split-Path -Leaf $config) --format json --report 'baseline.json' | Out-Host
     if ($LASTEXITCODE -ne 2) { throw 'baseline-failure package consumer smoke failed' }
