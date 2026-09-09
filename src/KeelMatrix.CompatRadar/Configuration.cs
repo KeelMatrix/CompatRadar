@@ -151,7 +151,7 @@ internal static class ConfigurationLoader
             }
             else if (package is not null || feed is not null)
             {
-                errors.Add($"watch[{index}] SDK/runtime previews cannot specify package or feed.");
+                errors.Add($"watch[{index}] SDK previews cannot specify package or feed.");
             }
 
             if (candidates is not null)
