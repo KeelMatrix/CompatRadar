@@ -85,8 +85,18 @@ public sealed class ReportAndCliTests
             var reportJson = File.ReadAllText(Path.Combine(root, "report.json"));
             var report = ReportJson.Deserialize(reportJson)!;
             var finding = Assert.Single(report.Findings);
+            Assert.Equal(ResultClassification.FutureRegression, finding.Classification);
             var console = output.ToString() + error;
-            var sensitiveValues = new[] { "my-secret-value", "quoted-api-key", "token-value", "bearer-value" };
+            var sensitiveValues = new[]
+            {
+                "my-secret-value",
+                "quoted-api-key",
+                "token-value",
+                "bearer-value",
+                "json-api-key",
+                "json-password",
+                "json-access-token"
+            };
 
             foreach (var sensitiveValue in sensitiveValues)
             {

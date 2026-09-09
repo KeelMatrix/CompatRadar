@@ -34,14 +34,26 @@ try {
 </Project>
 '@
     Set-Content -LiteralPath (Join-Path $fixture 'Program.cs') -Value @'
-if (Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE_VERSION") == "9.0.120") {
+var candidate = Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE") == "1";
+var version = Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE_VERSION") ?? "current";
+var attempt = Environment.GetEnvironmentVariable("COMPATRADAR_ATTEMPT") ?? "0";
+var behavior = File.Exists("smoke-behavior.txt") ? File.ReadAllText("smoke-behavior.txt").Trim() : "";
+if (behavior == "baseline") {
+    Environment.Exit(18);
+}
+if (behavior == "flaky" && candidate && version == "9.0.120" && attempt == "1") {
+    Environment.Exit(18);
+}
+if (behavior == "" && candidate && version == "9.0.120") {
     Console.Error.WriteLine("MY_SECRET=smoke-secret-value");
     Console.Error.WriteLine("API_KEY=\"smoke-quoted-api-key\"");
     Console.Error.WriteLine("TOKEN=smoke-token-value");
     Console.Error.WriteLine("authorization: Bearer smoke-bearer-value");
+    Console.Error.WriteLine("{\"apiKey\": \"smoke-json-api-key\", \"password\": \"smoke-json-password\", \"access_token\": \"smoke-json-access-token\"}");
     Environment.Exit(19);
 }
 '@
+    Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value ''
     $config = Join-Path $fixture 'compat-radar.json'
     Set-Content -LiteralPath $config -Value @'
 {
@@ -52,6 +64,7 @@ if (Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE_VERSION") == "9.0.
   "policy": { "confirmationRuns": 1 }
 }
 '@
+    $baseConfig = Get-Content -Raw -LiteralPath $config
 
     $tool = Join-Path $toolPath 'compat-radar.exe'
     Push-Location -LiteralPath $fixture
@@ -66,11 +79,28 @@ if (Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE_VERSION") == "9.0.
     $breakJson = Get-Content -Raw -LiteralPath (Join-Path $fixture 'break.json')
     $break = $breakJson | ConvertFrom-Json
     if ($stable.exitCode -ne 0) { throw 'stable report exit code mismatch' }
-    if ($break.exitCode -ne 1 -or $break.findings.Count -ne 1) { throw 'future-break report mismatch' }
-    foreach ($sensitiveValue in @('smoke-secret-value', 'smoke-quoted-api-key', 'smoke-token-value', 'smoke-bearer-value')) {
+    if ($break.exitCode -ne 1 -or $break.findings.Count -ne 1 -or $break.findings[0].classification -ne 'FUTURE_REGRESSION') { throw 'future-break report mismatch' }
+    foreach ($sensitiveValue in @('smoke-secret-value', 'smoke-quoted-api-key', 'smoke-token-value', 'smoke-bearer-value', 'smoke-json-api-key', 'smoke-json-password', 'smoke-json-access-token')) {
         if ($breakOutput.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to console" }
         if ($breakJson.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to report" }
     }
+
+    Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'baseline'
+    $baselineConfig = $baseConfig.Replace('"8.0.424"', '"9.0.120"')
+    Set-Content -LiteralPath $config -Value $baselineConfig
+    & $tool check --config $config --format json --report (Join-Path $fixture 'baseline.json') | Out-Host
+    if ($LASTEXITCODE -ne 2) { throw 'baseline-failure package consumer smoke failed' }
+    $baseline = Get-Content -Raw -LiteralPath (Join-Path $fixture 'baseline.json') | ConvertFrom-Json
+    if ($baseline.exitCode -ne 2 -or $baseline.watches[0].comparisons[0].classification -ne 'INCONCLUSIVE_BASELINE_FAILED') { throw 'baseline report mismatch' }
+
+    Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'flaky'
+    $flakyConfig = $baselineConfig.Replace('"confirmationRuns": 1', '"confirmationRuns": 2')
+    Set-Content -LiteralPath $config -Value $flakyConfig
+    & $tool check --config $config --format json --report (Join-Path $fixture 'flaky.json') | Out-Host
+    if ($LASTEXITCODE -ne 2) { throw 'flaky package consumer smoke failed' }
+    $flaky = Get-Content -Raw -LiteralPath (Join-Path $fixture 'flaky.json') | ConvertFrom-Json
+    if ($flaky.exitCode -ne 2 -or $flaky.watches[0].comparisons[0].classification -ne 'INCONCLUSIVE_FLAKY') { throw 'flaky report mismatch' }
+
     Write-Host 'Package consumer smoke passed.'
 }
 finally {
