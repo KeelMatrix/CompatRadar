@@ -54,7 +54,25 @@ public sealed class EngineTests
             Assert.Equal(1, result.Report.ExitCode);
             Assert.Equal(ResultClassification.FutureRegression, comparison.Classification);
             Assert.Equal("1.1.0", comparison.Witness.Candidate);
+            Assert.Contains("-p:UseSharedCompilation=false", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
             Assert.False(string.IsNullOrWhiteSpace(comparison.Witness.Fingerprint));
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
+    public async Task MonotonicCandidateSequenceLocalizesFirstConfirmedFailure()
+    {
+        var root = TestFixture.CreateRepository("monotonic");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "monotonic", "\"1.0.0\", \"1.1.0\", \"2.0.0\"");
+            var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
+            var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+
+            Assert.Equal(1, result.Report.ExitCode);
+            Assert.Equal("1.1.0", result.Report.Watches[0].FirstConfirmedBadCandidate);
+            Assert.Equal(["1.1.0", "2.0.0"], result.Report.Watches[0].ObservedFailingCandidates);
         }
         finally { TestFixture.DeleteRepository(root); }
     }

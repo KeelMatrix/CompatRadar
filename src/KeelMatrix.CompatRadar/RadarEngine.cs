@@ -196,13 +196,15 @@ internal sealed class RadarEngine
                 cancellationToken).ConfigureAwait(false);
         }
 
+        var preparedValidationCommand = PrepareValidationCommand(executionValidation.Command!);
+
         var classification = Classify(stable, future, candidateEvaluated);
         var witness = new ReproductionWitness(
             RadarContract.SchemaVersion,
             revision,
             configurationPath,
             configuration.Validation.WorkingDirectory,
-            executionValidation.Command!.Display,
+            preparedValidationCommand.Display,
             future.RestoreCommand,
             watch.Package,
             candidate,
@@ -279,7 +281,7 @@ internal sealed class RadarEngine
         return new RunEvidence(
             classification,
             candidate is not null,
-            validationCommand.Display,
+            command.Display,
             configuration.Validation.WorkingDirectory,
             restoreCommand,
             representative.Summary,
@@ -397,17 +399,35 @@ internal sealed class RadarEngine
         return new string(characters);
     }
 
-    private static string? FindMonotonicFirstBad(IReadOnlyList<string> candidates, IReadOnlyList<ResultClassification> classifications)
+    private static string? FindMonotonicFirstBad(IReadOnlyList<string> candidates, ResultClassification[] classifications)
     {
-        for (var index = 0; index < classifications.Count; index++)
+        for (var index = 0; index < classifications.Length; index++)
         {
             if (classifications[index] != ResultClassification.FutureRegression)
             {
                 continue;
             }
 
-            var allPriorPass = classifications.Take(index).All(item => item == ResultClassification.Compatible);
-            var allLaterFail = classifications.Skip(index).All(item => item == ResultClassification.FutureRegression);
+            var allPriorPass = true;
+            for (var priorIndex = 0; priorIndex < index; priorIndex++)
+            {
+                if (classifications[priorIndex] != ResultClassification.Compatible)
+                {
+                    allPriorPass = false;
+                    break;
+                }
+            }
+
+            var allLaterFail = true;
+            for (var laterIndex = index; laterIndex < classifications.Length; laterIndex++)
+            {
+                if (classifications[laterIndex] != ResultClassification.FutureRegression)
+                {
+                    allLaterFail = false;
+                    break;
+                }
+            }
+
             if (allPriorPass && allLaterFail)
             {
                 return candidates[index];
