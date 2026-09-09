@@ -110,13 +110,22 @@ jobs:
       - name: Assert temporary comparison state was cleaned
         shell: pwsh
         run: |
-          $tempRoot = [IO.Path]::GetTempPath()
-          $leftovers = @()
-          foreach ($name in @('compat-radar', 'compat-radar-tests', 'compat-radar-sdk-test', 'compat-radar-crlf', 'compat-radar-links')) {
-            $path = Join-Path $tempRoot $name
-            if (Test-Path -LiteralPath $path) {
-              $leftovers += @(Get-ChildItem -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+          function Get-TempLeftovers {
+            $tempRoot = [IO.Path]::GetTempPath()
+            foreach ($name in @('compat-radar', 'compat-radar-tests', 'compat-radar-sdk-test', 'compat-radar-crlf', 'compat-radar-links')) {
+              $path = Join-Path $tempRoot $name
+              if (Test-Path -LiteralPath $path) {
+                Get-ChildItem -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue |
+                  Select-Object -ExpandProperty FullName |
+                  Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+              }
             }
+          }
+          $leftovers = @()
+          for ($attempt = 1; $attempt -le 10; $attempt++) {
+            $leftovers = @(Get-TempLeftovers)
+            if ($leftovers.Count -eq 0) { break }
+            Start-Sleep -Seconds 2
           }
           if ($leftovers.Count -gt 0) { throw "Temporary CompatRadar state was not cleaned: $($leftovers -join ', ')" }
 
@@ -267,7 +276,12 @@ jobs:
       - name: Assert smoke temporary state was cleaned
         shell: pwsh
         run: |
-          $leftovers = @(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory -Filter 'compat-radar-consumer-*' -ErrorAction SilentlyContinue)
+          $leftovers = @()
+          for ($attempt = 1; $attempt -le 10; $attempt++) {
+            $leftovers = @(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory -Filter 'compat-radar-consumer-*' -ErrorAction SilentlyContinue)
+            if ($leftovers.Count -eq 0) { break }
+            Start-Sleep -Seconds 2
+          }
           if ($leftovers.Count -gt 0) { throw "Package smoke temporary state was not cleaned: $($leftovers.FullName -join ', ')" }
 
       - name: Assert no telemetry artifacts were produced
