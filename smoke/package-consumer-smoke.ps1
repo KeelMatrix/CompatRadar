@@ -68,8 +68,8 @@ if (Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE_VERSION") == "9.0.
     if ($stable.exitCode -ne 0) { throw 'stable report exit code mismatch' }
     if ($break.exitCode -ne 1 -or $break.findings.Count -ne 1) { throw 'future-break report mismatch' }
     foreach ($sensitiveValue in @('smoke-secret-value', 'smoke-quoted-api-key', 'smoke-token-value', 'smoke-bearer-value')) {
-        if ($breakOutput.Contains($sensitiveValue, [StringComparison]::Ordinal)) { throw "installed package leaked $sensitiveValue to console" }
-        if ($breakJson.Contains($sensitiveValue, [StringComparison]::Ordinal)) { throw "installed package leaked $sensitiveValue to report" }
+        if ($breakOutput.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to console" }
+        if ($breakJson.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to report" }
     }
     Write-Host 'Package consumer smoke passed.'
 }
