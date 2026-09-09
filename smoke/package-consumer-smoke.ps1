@@ -35,6 +35,10 @@ try {
 '@
     Set-Content -LiteralPath (Join-Path $fixture 'Program.cs') -Value @'
 if (Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE_VERSION") == "9.0.120") {
+    Console.Error.WriteLine("MY_SECRET=smoke-secret-value");
+    Console.Error.WriteLine("API_KEY=\"smoke-quoted-api-key\"");
+    Console.Error.WriteLine("TOKEN=smoke-token-value");
+    Console.Error.WriteLine("authorization: Bearer smoke-bearer-value");
     Environment.Exit(19);
 }
 '@
@@ -55,13 +59,18 @@ if (Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE_VERSION") == "9.0.
     if ($LASTEXITCODE -ne 0) { throw 'stable-identical package consumer smoke failed' }
 
     (Get-Content -Raw -LiteralPath $config).Replace('"8.0.424"', '"9.0.120"') | Set-Content -LiteralPath $config
-    & $tool check --config $config --format json --report (Join-Path $fixture 'break.json')
+    $breakOutput = (& $tool check --config $config --format json --report (Join-Path $fixture 'break.json') 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 1) { throw 'planted future-break package consumer smoke failed' }
 
     $stable = Get-Content -Raw -LiteralPath (Join-Path $fixture 'stable.json') | ConvertFrom-Json
-    $break = Get-Content -Raw -LiteralPath (Join-Path $fixture 'break.json') | ConvertFrom-Json
+    $breakJson = Get-Content -Raw -LiteralPath (Join-Path $fixture 'break.json')
+    $break = $breakJson | ConvertFrom-Json
     if ($stable.exitCode -ne 0) { throw 'stable report exit code mismatch' }
     if ($break.exitCode -ne 1 -or $break.findings.Count -ne 1) { throw 'future-break report mismatch' }
+    foreach ($sensitiveValue in @('smoke-secret-value', 'smoke-quoted-api-key', 'smoke-token-value', 'smoke-bearer-value')) {
+        if ($breakOutput.Contains($sensitiveValue, [StringComparison]::Ordinal)) { throw "installed package leaked $sensitiveValue to console" }
+        if ($breakJson.Contains($sensitiveValue, [StringComparison]::Ordinal)) { throw "installed package leaked $sensitiveValue to report" }
+    }
     Write-Host 'Package consumer smoke passed.'
 }
 finally {
