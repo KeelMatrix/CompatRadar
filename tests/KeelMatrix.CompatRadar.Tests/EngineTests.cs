@@ -95,9 +95,11 @@ public sealed class EngineTests
     [Fact]
     public void SanitizesSecretsAndBoundsDiagnostics()
     {
-        var diagnostic = ProcessRunner.NormalizeDiagnostic("password=shh token=abc authorization: Bearer xyz\n" + new string('x', 5000), "C:\\work");
+        var diagnostic = ProcessRunner.NormalizeDiagnostic("password=shh MY_SECRET=my-secret API_KEY=\"quoted-api-key\" TOKEN=abc authorization: Bearer xyz\n" + new string('x', 5000), "C:\\work");
 
         Assert.DoesNotContain("shh", diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("my-secret", diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("quoted-api-key", diagnostic, StringComparison.Ordinal);
         Assert.DoesNotContain("abc", diagnostic, StringComparison.Ordinal);
         Assert.DoesNotContain("xyz", diagnostic, StringComparison.Ordinal);
         Assert.True(diagnostic.Length <= 2000);

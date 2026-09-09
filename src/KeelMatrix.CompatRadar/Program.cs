@@ -244,7 +244,7 @@ internal static class RadarApplication
                 output.WriteLine("  current stable");
                 output.WriteLine("  PASS");
                 output.WriteLine("Candidate:");
-                output.WriteLine($"  {finding.Witness.Package ?? "SDK/runtime"} {finding.Candidate}");
+                output.WriteLine($"  {finding.Witness.Package ?? "SDK"} {finding.Candidate}");
                 output.WriteLine("  FAIL");
                 output.WriteLine($"First confirmed bad candidate: {finding.Candidate}");
                 output.WriteLine($"Failure: {finding.CandidateResult.Summary}");

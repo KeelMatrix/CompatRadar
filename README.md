@@ -2,7 +2,7 @@
 
 Dependency bots tell you a new version exists. CompatRadar tells you whether a future version actually breaks your repository while today's stable state still passes—and gives you a reproducible failure before the upgrade becomes urgent.
 
-CompatRadar is a local-first .NET tool. It compares an explicitly selected NuGet prerelease or SDK/runtime preview with the current stable control, repeats candidate failures, reports uncertainty honestly, and localizes a first bad candidate only when the evidence is monotonic.
+CompatRadar is a local-first .NET tool. It compares an explicitly selected NuGet prerelease or .NET SDK preview with the current stable control, repeats candidate failures, reports uncertainty honestly, and localizes a first bad candidate only when the evidence is monotonic.
 
 ## Install
 
@@ -51,9 +51,9 @@ compat-radar check --report compat-radar-report.json
 
 The command is explicit: CompatRadar does not infer every dependency worth watching. The watched package must already be referenced by the repository in a `PackageReference` or central `PackageVersion` declaration. The candidate override is applied only to an isolated temporary copy.
 
-## SDK/runtime preview check
+## SDK preview check
 
-Use the same schema with an SDK/runtime channel:
+Use the same schema with an SDK preview channel:
 
 ```json
 {
@@ -61,9 +61,8 @@ Use the same schema with an SDK/runtime channel:
   "control": { "sdk": "current" },
   "watch": [
     {
-      "kind": "sdk/runtime-preview",
-      "candidates": ["9.0.120", "10.0.400"],
-      "runtime": "sdk"
+      "kind": "sdk-preview",
+      "candidates": ["9.0.120", "10.0.400"]
     }
   ],
   "validation": {
@@ -75,14 +74,14 @@ Use the same schema with an SDK/runtime channel:
 }
 ```
 
-For this channel, each candidate is applied to an isolated `global.json`. The requested SDK must be installed or otherwise available to the local .NET host. A runtime preview is selected through the SDK/runtime installation used by that `global.json`; the tool does not download SDKs for you.
+For this channel, each candidate is applied to an isolated `global.json`. The requested SDK must be installed or otherwise available to the local .NET host; the tool does not download SDKs for you. This v1 adapter intentionally supports SDK previews only; runtime-only preview selection is unsupported.
 
 ## Configuration
 
 Schema version `1` has these fields:
 
 - `control.sdk`: must be `current`; this is the stable control in the current execution environment.
-- `watch`: one or more explicit channels. Each channel has `kind`, `candidates`, and an optional `id`. NuGet channels also require `package` and may specify an HTTP(S) `feed` without embedded credentials. SDK/runtime channels may specify `runtime` as `sdk` or `runtime`.
+- `watch`: one or more explicit channels. Each channel has `kind`, `candidates`, and an optional `id`. NuGet channels also require `package` and may specify an HTTP(S) `feed` without embedded credentials. The supported SDK channel kind is `sdk-preview`; runtime-only preview configuration is rejected as unsupported.
 - `validation.command`: an executable plus arguments. Commands are started directly; shell syntax is not evaluated by CompatRadar.
 - `validation.workingDirectory`: a repository-relative directory.
 - `validation.timeoutSeconds`: bounded command timeout from 1 through 86400 seconds.
@@ -155,7 +154,7 @@ Telemetry uses `KeelMatrix.Telemetry` only after the first trustworthy stable-ve
 
 ## Support and limitations
 
-The tool targets `net8.0` and supports Windows, Linux, and macOS operations in the product design. The current local evidence covers Windows only; Linux/macOS execution and remote CI have not been run for this candidate. The v1 adapters are explicit NuGet prerelease package overrides and SDK/runtime preview selection through `global.json`.
+The tool targets `net8.0` and supports Windows, Linux, and macOS operations in the product design. The current local evidence covers Windows only; Linux/macOS execution and remote CI have not been run for this candidate. The v1 adapters are explicit NuGet prerelease package overrides and SDK preview selection through `global.json`; runtime-only preview selection is unsupported and rejected.
 
 CompatRadar does not manage dependencies, open update pull requests, discover all dependencies, run hosted builds, provide accounts or scheduling, send notifications, support non-.NET ecosystems, generate patches, or guarantee that every future incompatibility will be predicted.
 

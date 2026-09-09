@@ -76,6 +76,30 @@ public sealed class ConfigurationTests
     }
 
     [Fact]
+    public void RejectsRuntimePreviewSelectorOutsideTheSupportedSdkBoundary()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "compat-radar.json"), """
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [{ "kind": "sdk-preview", "candidates": ["9.0.120"], "runtime": "runtime" }],
+  "validation": { "command": "dotnet test", "workingDirectory": ".", "timeoutSeconds": 30 },
+  "policy": { "confirmationRuns": 1 }
+}
+""");
+
+            var result = ConfigurationLoader.Load(root, "compat-radar.json");
+
+            Assert.False(result.IsValid);
+            Assert.Contains(result.Errors, error => error.Contains("unsupported property 'runtime'", StringComparison.Ordinal));
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
     public void SDKOverrideIsAppliedOnlyToTheMaterializedCopy()
     {
         var root = TestFixture.CreateRepository("pass");

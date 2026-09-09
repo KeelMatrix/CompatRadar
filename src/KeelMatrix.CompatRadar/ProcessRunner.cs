@@ -109,7 +109,7 @@ internal static class CommandParser
 internal static class ProcessRunner
 {
     private static readonly Regex SecretPattern = new(
-        "(?i)(\\b(?:password|token|secret|api[_-]?key|client[_-]?secret|authorization)\\b\\s*[:=]\\s*)(?:Bearer\\s+\\S+|\\\"[^\\\"]*\\\"|'[^']*'|\\S+)|(?i)\\bBearer\\s+\\S+",
+        "(?i)((?<![A-Za-z0-9])[A-Za-z0-9_-]*(?:password|token|secret|api[_-]?key|client[_-]?secret|authorization)[A-Za-z0-9_-]*\\s*[:=]\\s*)(?:Bearer\\s+\\S+|\\\"[^\\\"]*\\\"|'[^']*'|\\S+)|(?i)\\bBearer\\s+\\S+",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex AbsolutePathPattern = new("(?i)(?:[A-Z]:[\\\\/]|/)[^\\r\\n ]+", RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex VersionPattern = new("\\b\\d+(?:\\.\\d+){1,3}(?:-[0-9A-Za-z.-]+)?\\b", RegexOptions.CultureInvariant | RegexOptions.Compiled);

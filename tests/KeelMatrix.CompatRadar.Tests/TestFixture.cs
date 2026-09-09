@@ -42,6 +42,11 @@ var version = Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE_VERSION"
 var attempt = Environment.GetEnvironmentVariable("COMPATRADAR_ATTEMPT") ?? "0";
 var behavior = "{behavior}";
 if (behavior == "timeout") System.Threading.Thread.Sleep(5000);
+if (behavior == "secret-diagnostic" && candidate) Console.Error.WriteLine("MY_SECRET=my-secret-value");
+if (behavior == "secret-diagnostic" && candidate) Console.Error.WriteLine("API_KEY=\"quoted-api-key\"");
+if (behavior == "secret-diagnostic" && candidate) Console.Error.WriteLine("TOKEN=token-value");
+if (behavior == "secret-diagnostic" && candidate) Console.Error.WriteLine("authorization: Bearer bearer-value");
+if (behavior == "secret-diagnostic" && candidate) Environment.Exit(17);
 if (behavior == "stable-fail" && !candidate) Environment.Exit(11);
     if (behavior == "monotonic" && candidate && (version == "1.1.0" || version == "2.0.0")) Environment.Exit(12);
     if (behavior == "non-monotonic" && candidate && version == "1.1.0") Environment.Exit(13);

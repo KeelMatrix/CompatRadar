@@ -12,7 +12,7 @@ internal static class RadarContract
 internal enum WatchKind
 {
     NuGetPrerelease,
-    SdkRuntimePreview
+    SdkPreview
 }
 
 internal enum ResultClassification
@@ -40,8 +40,7 @@ internal sealed record WatchConfiguration(
     WatchKind Kind,
     string? Package,
     IReadOnlyList<string> Candidates,
-    string? Feed,
-    string? Runtime);
+    string? Feed);
 
 internal sealed record ValidationConfiguration(
     string Command,

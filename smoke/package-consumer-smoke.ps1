@@ -43,7 +43,7 @@ if (Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE_VERSION") == "9.0.
 {
   "version": 1,
   "control": { "sdk": "current" },
-  "watch": [{ "kind": "sdk/runtime-preview", "candidates": ["8.0.424"] }],
+  "watch": [{ "kind": "sdk-preview", "candidates": ["8.0.424"] }],
   "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": ".", "timeoutSeconds": 120 },
   "policy": { "confirmationRuns": 1 }
 }

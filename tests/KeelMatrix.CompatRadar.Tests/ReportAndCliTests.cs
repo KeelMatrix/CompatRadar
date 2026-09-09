@@ -66,4 +66,44 @@ public sealed class ReportAndCliTests
             TestFixture.DeleteRepository(root);
         }
     }
+
+    [Fact]
+    public async Task SecretLikeDiagnosticsNeverLeakIntoConsoleReportSignaturesOrWitness()
+    {
+        var root = TestFixture.CreateRepository("secret-diagnostic");
+        var oldOptOut = Environment.GetEnvironmentVariable("KEELMATRIX_NO_TELEMETRY");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "secret-diagnostic", "\"1.1.0\"", confirmationRuns: 1);
+            Environment.SetEnvironmentVariable("KEELMATRIX_NO_TELEMETRY", "1");
+            var output = new StringWriter();
+            var error = new StringWriter();
+            var telemetry = new RecordingTelemetry();
+            var exitCode = await RadarApplication.RunAsync(["check", "--format", "json", "--report", "report.json"], root, telemetry, output, error);
+
+            Assert.Equal(1, exitCode);
+            var reportJson = File.ReadAllText(Path.Combine(root, "report.json"));
+            var report = ReportJson.Deserialize(reportJson)!;
+            var finding = Assert.Single(report.Findings);
+            var console = output.ToString() + error;
+            var sensitiveValues = new[] { "my-secret-value", "quoted-api-key", "token-value", "bearer-value" };
+
+            foreach (var sensitiveValue in sensitiveValues)
+            {
+                Assert.DoesNotContain(sensitiveValue, console, StringComparison.Ordinal);
+                Assert.DoesNotContain(sensitiveValue, reportJson, StringComparison.Ordinal);
+                Assert.DoesNotContain(sensitiveValue, finding.CandidateResult.Summary, StringComparison.Ordinal);
+                Assert.DoesNotContain(sensitiveValue, finding.CandidateResult.NormalizedSignature, StringComparison.Ordinal);
+                Assert.DoesNotContain(sensitiveValue, finding.Witness.FocusedFailure, StringComparison.Ordinal);
+                Assert.DoesNotContain(sensitiveValue, finding.Witness.NormalizedFailureSignature, StringComparison.Ordinal);
+                Assert.All(finding.CandidateResult.Attempts, attempt =>
+                    Assert.DoesNotContain(sensitiveValue, attempt.NormalizedSignature, StringComparison.Ordinal));
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("KEELMATRIX_NO_TELEMETRY", oldOptOut);
+            TestFixture.DeleteRepository(root);
+        }
+    }
 }

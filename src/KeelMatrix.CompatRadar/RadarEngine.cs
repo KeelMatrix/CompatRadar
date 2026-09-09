@@ -207,7 +207,7 @@ internal sealed class RadarEngine
             watch.Package,
             candidate,
             watch.Feed,
-            watch.Kind == WatchKind.SdkRuntimePreview ? candidate : null,
+            watch.Kind == WatchKind.SdkPreview ? candidate : null,
             future.Summary,
             future.NormalizedSignature,
             future.Fingerprint,
@@ -224,6 +224,7 @@ internal sealed class RadarEngine
         string? feed,
         CancellationToken cancellationToken)
     {
+        var command = PrepareValidationCommand(validationCommand);
         var attempts = new List<ProcessAttempt>();
         ProcessExecutionResult? restore = null;
         string? restoreCommand = null;
@@ -255,7 +256,7 @@ internal sealed class RadarEngine
         for (var attempt = 1; attempt <= configuration.Policy.ConfirmationRuns; attempt++)
         {
             var result = await ProcessRunner.RunAsync(
-                validationCommand,
+                command,
                 workingDirectory,
                 BuildEnvironment(materializedRoot, candidate, attempt),
                 TimeSpan.FromSeconds(configuration.Validation.TimeoutSeconds),
@@ -285,6 +286,39 @@ internal sealed class RadarEngine
             representative.NormalizedSignature,
             representative.Fingerprint,
             attempts);
+    }
+
+    private static ParsedCommand PrepareValidationCommand(ParsedCommand command)
+    {
+        if (!SupportsMsBuildProperties(command)
+            || command.Arguments.Any(argument => argument.Equals("-p:UseSharedCompilation=false", StringComparison.OrdinalIgnoreCase)))
+        {
+            return command;
+        }
+
+        var arguments = command.Arguments.ToList();
+        var separatorIndex = arguments.FindIndex(argument => argument == "--");
+        if (separatorIndex >= 0)
+        {
+            arguments.Insert(separatorIndex, "-p:UseSharedCompilation=false");
+        }
+        else
+        {
+            arguments.Add("-p:UseSharedCompilation=false");
+        }
+
+        return new ParsedCommand(command.FileName, arguments);
+    }
+
+    private static bool SupportsMsBuildProperties(ParsedCommand command)
+    {
+        if (!IsDotnetCommand(command))
+        {
+            return false;
+        }
+
+        var verb = command.Arguments.Count == 0 ? null : command.Arguments[0];
+        return verb is "build" or "msbuild" or "pack" or "publish" or "run" or "test";
     }
 
     private static ParsedCommand BuildRestoreCommand(ParsedCommand validationCommand, string materializedRoot, string? feed)
@@ -353,7 +387,7 @@ internal sealed class RadarEngine
     private static string FormatKind(WatchKind kind) => kind switch
     {
         WatchKind.NuGetPrerelease => "nuget-prerelease",
-        WatchKind.SdkRuntimePreview => "sdk/runtime-preview",
+        WatchKind.SdkPreview => "sdk-preview",
         _ => "unsupported"
     };
 

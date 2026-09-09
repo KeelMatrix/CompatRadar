@@ -11,7 +11,7 @@ internal static class ConfigurationLoader
 {
     private static readonly HashSet<string> RootProperties = ["version", "control", "watch", "validation", "policy"];
     private static readonly HashSet<string> ControlProperties = ["sdk"];
-    private static readonly HashSet<string> WatchProperties = ["id", "kind", "package", "candidates", "feed", "runtime"];
+    private static readonly HashSet<string> WatchProperties = ["id", "kind", "package", "candidates", "feed"];
     private static readonly HashSet<string> ValidationProperties = ["command", "workingDirectory", "timeoutSeconds"];
     private static readonly HashSet<string> PolicyProperties = ["confirmationRuns"];
 
@@ -135,7 +135,6 @@ internal static class ConfigurationLoader
             var candidates = ReadCandidateArray(element, index, errors);
             var package = ReadOptionalString(element, "package");
             var feed = ReadOptionalString(element, "feed");
-            var runtime = ReadOptionalString(element, "runtime");
 
             if (feed is not null && !IsSafeFeed(feed))
             {
@@ -149,19 +148,10 @@ internal static class ConfigurationLoader
                     errors.Add($"watch[{index}].package is required for nuget-prerelease.");
                 }
 
-                if (runtime is not null)
-                {
-                    errors.Add($"watch[{index}].runtime is not valid for nuget-prerelease.");
-                }
             }
             else if (package is not null || feed is not null)
             {
                 errors.Add($"watch[{index}] SDK/runtime previews cannot specify package or feed.");
-            }
-
-            if (runtime is not null && runtime is not "sdk" && runtime is not "runtime")
-            {
-                errors.Add($"watch[{index}].runtime must be 'sdk' or 'runtime'.");
             }
 
             if (candidates is not null)
@@ -175,7 +165,7 @@ internal static class ConfigurationLoader
 
             if (kind is not null && candidates is not null)
             {
-                watches.Add(new WatchConfiguration(id, kind.Value, package, candidates, feed, runtime));
+                watches.Add(new WatchConfiguration(id, kind.Value, package, candidates, feed));
             }
         }
 
@@ -235,14 +225,14 @@ internal static class ConfigurationLoader
             return WatchKind.NuGetPrerelease;
         }
 
-        if (value is "sdk/runtime-preview" or "sdk-runtime-preview")
+        if (value is "sdk-preview")
         {
-            return WatchKind.SdkRuntimePreview;
+            return WatchKind.SdkPreview;
         }
 
         if (value is not null)
         {
-            errors.Add($"watch[{index}].kind must be 'nuget-prerelease' or 'sdk/runtime-preview'.");
+            errors.Add($"watch[{index}].kind must be 'nuget-prerelease' or 'sdk-preview'.");
         }
 
         return null;
