@@ -46,7 +46,7 @@ if (behavior == "secret-diagnostic" && candidate) Console.Error.WriteLine("MY_SE
 if (behavior == "secret-diagnostic" && candidate) Console.Error.WriteLine("API_KEY=\"quoted-api-key\"");
 if (behavior == "secret-diagnostic" && candidate) Console.Error.WriteLine("TOKEN=token-value");
 if (behavior == "secret-diagnostic" && candidate) Console.Error.WriteLine("authorization: Bearer bearer-value");
-if (behavior == "secret-diagnostic" && candidate) Console.Error.WriteLine("{(char)123}\"apiKey\": \"json-api-key\", \"password\": \"json-password\", \"access_token\": \"json-access-token\"{(char)125}");
+if (behavior == "secret-diagnostic" && candidate) Console.Error.WriteLine("{(char)123}\"apiKey\": \"json-api-key\", \"password\": \"json-password\", \"access_token\": \"json-access-token\", \"privateKey\": \"private-key-value\", \"client_secret\": \"client-secret-value\", \"auth_token\": \"auth-token-value\", \"ConnectionString\": \"connection-string-value\", \"opaque\": \"fallback-opaque-value-12345\", \"message\": \"ordinary diagnostic\"{(char)125}");
 if (behavior == "secret-diagnostic" && candidate) Environment.Exit(17);
 if (behavior == "stable-fail" && !candidate) Environment.Exit(11);
     if (behavior == "monotonic" && candidate && (version == "1.1.0" || version == "2.0.0")) Environment.Exit(12);

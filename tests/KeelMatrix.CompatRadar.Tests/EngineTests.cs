@@ -106,6 +106,21 @@ public sealed class EngineTests
     }
 
     [Fact]
+    public void SanitizesSecretLikeQuotedKeysAndCredentialShapedPairs()
+    {
+        var diagnostic = ProcessRunner.NormalizeDiagnostic(
+            "{\"privateKey\":\"private-key-value\",\"client_secret\":\"client-secret-value\",\"auth_token\":\"auth-token-value\",\"ConnectionString\":\"connection-string-value\",\"opaque\":\"fallback-opaque-value-12345\",\"message\":\"ordinary diagnostic\"}",
+            "C:\\work");
+
+        foreach (var sensitiveValue in new[] { "private-key-value", "client-secret-value", "auth-token-value", "connection-string-value", "fallback-opaque-value-12345" })
+        {
+            Assert.DoesNotContain(sensitiveValue, diagnostic, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("ordinary diagnostic", diagnostic, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TimeoutIsInconclusiveAndRequestsProcessTreeTermination()
     {
         var root = TestFixture.CreateRepository("timeout");

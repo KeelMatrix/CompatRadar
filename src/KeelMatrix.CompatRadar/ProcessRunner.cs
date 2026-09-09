@@ -108,9 +108,13 @@ internal static class CommandParser
 
 internal static class ProcessRunner
 {
-    private static readonly Regex SecretPattern = new(
-        """(?i)(?:(?<prefix>(?<![A-Za-z0-9])["']?[A-Za-z0-9_-]*(?:password|token|secret|api[_-]?key|client[_-]?secret|authorization)[A-Za-z0-9_-]*["']?\s*[:=]\s*)(?:Bearer\s+)?(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+)|(?<bearer>\bBearer\s+\S+))""",
+    private static readonly Regex SecretAssignmentPattern = new(
+        """(?ix)(?<prefix>(?:"[^"]*(?:key|token|secret|password|credential|connection[-_ ]?string|passphrase|passwd|pwd|auth|authorization|signature)[^"]*"|'[^']*(?:key|token|secret|password|credential|connection[-_ ]?string|passphrase|passwd|pwd|auth|authorization|signature)[^']*'|(?<![A-Za-z0-9])[A-Za-z0-9_.-]*(?:key|token|secret|password|credential|connection[-_ ]?string|passphrase|passwd|pwd|auth|authorization|signature)[A-Za-z0-9_.-]*)\s*[:=]\s*)(?:Bearer\s+)?(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\s}\]]+)""",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex KeyValuePattern = new(
+        """(?<prefix>(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[A-Za-z_][A-Za-z0-9_.-]*)\s*[:=]\s*)(?<value>"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\s}\]]+)""",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex BearerPattern = new(@"\bBearer\s+\S+", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex AbsolutePathPattern = new("(?i)(?:[A-Z]:[\\\\/]|/)[^\\r\\n ]+", RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex VersionPattern = new("\\b\\d+(?:\\.\\d+){1,3}(?:-[0-9A-Za-z.-]+)?\\b", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
@@ -216,15 +220,36 @@ internal static class ProcessRunner
         return normalized.Length > 2000 ? normalized[..2000] : normalized;
     }
 
-    public static string Redact(string text) => SecretPattern.Replace(text, match =>
+    public static string Redact(string text)
     {
-        if (match.Groups["prefix"].Success)
+        var redacted = SecretAssignmentPattern.Replace(text, match => match.Groups["prefix"].Value + "<redacted>");
+        redacted = KeyValuePattern.Replace(redacted, match =>
         {
-            return match.Groups["prefix"].Value + "<redacted>";
+            var value = match.Groups["value"].Value;
+            return LooksLikeOpaqueCredential(value)
+                ? match.Groups["prefix"].Value + "<redacted>"
+                : match.Value;
+        });
+        return BearerPattern.Replace(redacted, "Bearer <redacted>");
+    }
+
+    private static bool LooksLikeOpaqueCredential(string value)
+    {
+        var unquoted = value.Length >= 2 && ((value[0] == '"' && value[^1] == '"') || (value[0] == '\'' && value[^1] == '\''))
+            ? value[1..^1]
+            : value;
+        if (unquoted.Length < 16 || unquoted.Any(char.IsWhiteSpace) || unquoted.Equals("<redacted>", StringComparison.Ordinal))
+        {
+            return false;
         }
 
-        return "Bearer <redacted>";
-    });
+        var hasLower = unquoted.Any(char.IsLower);
+        var hasUpper = unquoted.Any(char.IsUpper);
+        var hasDigit = unquoted.Any(char.IsDigit);
+        var hasSymbol = unquoted.Any(character => !char.IsLetterOrDigit(character));
+        var categories = (hasLower ? 1 : 0) + (hasUpper ? 1 : 0) + (hasDigit ? 1 : 0) + (hasSymbol ? 1 : 0);
+        return categories >= 3 || (unquoted.Length >= 24 && unquoted.Count(character => character is '-' or '_' or '.') >= 2);
+    }
 
     private static string Sanitize(string text, string workingDirectory)
     {

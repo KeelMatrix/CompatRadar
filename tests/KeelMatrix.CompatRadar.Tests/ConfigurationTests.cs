@@ -56,6 +56,62 @@ public sealed class ConfigurationTests
         finally { TestFixture.DeleteRepository(root); }
     }
 
+    [Theory]
+    [InlineData("https://feed.example/v3/index.json?apiKey=feed-secret")]
+    [InlineData("https://feed.example/v3/index.json?client_secret=feed-secret")]
+    [InlineData("https://feed.example/v3/index.json?access_token=feed-secret")]
+    [InlineData("https://feed.example/v3/index.json?privateKey=feed-secret")]
+    [InlineData("https://feed.example/v3/index.json?sig=feed-secret")]
+    [InlineData("https://feed.example/v3/index.json?credential=feed-secret")]
+    [InlineData("https://feed.example/v3/index.json?connectionString=feed-secret")]
+    [InlineData("https://user:feed-secret@feed.example/v3/index.json")]
+    public void RejectsCredentialBearingFeedUrls(string feed)
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "compat-radar.json"), $$"""
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [{ "kind": "nuget-prerelease", "package": "CompatRadar.TestDependency", "candidates": ["1.0.0"], "feed": "{{feed}}" }],
+  "validation": { "command": "dotnet test", "workingDirectory": ".", "timeoutSeconds": 30 },
+  "policy": { "confirmationRuns": 1 }
+}
+""");
+
+            var result = ConfigurationLoader.Load(root, "compat-radar.json");
+
+            Assert.False(result.IsValid);
+            Assert.Contains(result.Errors, error => error.Contains("without embedded credentials", StringComparison.Ordinal));
+            Assert.DoesNotContain("feed-secret", string.Join('\n', result.Errors), StringComparison.Ordinal);
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
+    public void AcceptsFeedUrlsWithNonCredentialQueryParameters()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "compat-radar.json"), """
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [{ "kind": "nuget-prerelease", "package": "CompatRadar.TestDependency", "candidates": ["1.0.0"], "feed": "https://feed.example/v3/index.json?tenant=public&protocol=3" }],
+  "validation": { "command": "dotnet test", "workingDirectory": ".", "timeoutSeconds": 30 },
+  "policy": { "confirmationRuns": 1 }
+}
+""");
+
+            var result = ConfigurationLoader.Load(root, "compat-radar.json");
+
+            Assert.True(result.IsValid);
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
     [Fact]
     public void RejectsWorkingDirectoryOutsideRepositoryDuringValidation()
     {

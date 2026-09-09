@@ -1,5 +1,7 @@
 using System.Text.Json;
 
+using System.Text.RegularExpressions;
+
 namespace KeelMatrix.CompatRadar;
 
 internal sealed record ConfigurationLoadResult(RadarConfiguration? Configuration, IReadOnlyList<string> Errors)
@@ -263,9 +265,36 @@ internal static class ConfigurationLoader
 
     private static bool IsSafeFeed(string value)
     {
-        return Uri.TryCreate(value, UriKind.Absolute, out var uri)
-            && (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) || uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-            && string.IsNullOrEmpty(uri.UserInfo);
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || (!uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) && !uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            || !string.IsNullOrEmpty(uri.UserInfo))
+        {
+            return false;
+        }
+
+        return uri.Query
+            .TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(parameter => parameter.Split('=', 2)[0])
+            .Select(parameter => Uri.UnescapeDataString(parameter))
+            .All(parameter => !IsCredentialQueryName(parameter));
+    }
+
+    private static bool IsCredentialQueryName(string value)
+    {
+        var camelSeparated = Regex.Replace(value, "([a-z0-9])([A-Z])", "$1_$2", RegexOptions.CultureInvariant);
+        var normalized = new string(camelSeparated.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+        if (normalized is "key" or "apikey" or "token" or "secret" or "password" or "credential" or "credentials" or "sig" or "signature" or "auth" or "authorization" or "connectionstring")
+        {
+            return true;
+        }
+
+        var parts = Regex.Split(camelSeparated, "[^A-Za-z0-9]+", RegexOptions.CultureInvariant)
+            .Where(part => part.Length > 0)
+            .Select(part => part.ToLowerInvariant())
+            .ToArray();
+        return parts.Any(part => part is "key" or "token" or "secret" or "password" or "credential" or "credentials" or "sig" or "signature" or "auth" or "authorization")
+            || (parts.Contains("connection", StringComparer.Ordinal) && parts.Contains("string", StringComparer.Ordinal));
     }
 
     private static void RejectUnknown(JsonElement element, HashSet<string> allowed, string context, List<string> errors)

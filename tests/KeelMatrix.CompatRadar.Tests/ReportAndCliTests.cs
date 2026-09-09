@@ -95,7 +95,12 @@ public sealed class ReportAndCliTests
                 "bearer-value",
                 "json-api-key",
                 "json-password",
-                "json-access-token"
+                "json-access-token",
+                "private-key-value",
+                "client-secret-value",
+                "auth-token-value",
+                "connection-string-value",
+                "fallback-opaque-value-12345"
             };
 
             foreach (var sensitiveValue in sensitiveValues)

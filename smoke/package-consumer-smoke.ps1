@@ -49,7 +49,7 @@ if (behavior == "" && candidate && version == "9.0.120") {
     Console.Error.WriteLine("API_KEY=\"smoke-quoted-api-key\"");
     Console.Error.WriteLine("TOKEN=smoke-token-value");
     Console.Error.WriteLine("authorization: Bearer smoke-bearer-value");
-    Console.Error.WriteLine("{\"apiKey\": \"smoke-json-api-key\", \"password\": \"smoke-json-password\", \"access_token\": \"smoke-json-access-token\"}");
+    Console.Error.WriteLine("{\"apiKey\": \"smoke-json-api-key\", \"password\": \"smoke-json-password\", \"access_token\": \"smoke-json-access-token\", \"privateKey\": \"smoke-private-key-value\", \"client_secret\": \"smoke-client-secret-value\", \"auth_token\": \"smoke-auth-token-value\", \"ConnectionString\": \"smoke-connection-string-value\", \"opaque\": \"smoke-fallback-opaque-value-12345\", \"message\": \"ordinary diagnostic\"}");
     Environment.Exit(19);
 }
 '@
@@ -80,10 +80,50 @@ if (behavior == "" && candidate && version == "9.0.120") {
     $break = $breakJson | ConvertFrom-Json
     if ($stable.exitCode -ne 0) { throw 'stable report exit code mismatch' }
     if ($break.exitCode -ne 1 -or $break.findings.Count -ne 1 -or $break.findings[0].classification -ne 'FUTURE_REGRESSION') { throw 'future-break report mismatch' }
-    foreach ($sensitiveValue in @('smoke-secret-value', 'smoke-quoted-api-key', 'smoke-token-value', 'smoke-bearer-value', 'smoke-json-api-key', 'smoke-json-password', 'smoke-json-access-token')) {
+    $sensitiveValues = @(
+        'smoke-secret-value',
+        'smoke-quoted-api-key',
+        'smoke-token-value',
+        'smoke-bearer-value',
+        'smoke-json-api-key',
+        'smoke-json-password',
+        'smoke-json-access-token',
+        'smoke-private-key-value',
+        'smoke-client-secret-value',
+        'smoke-auth-token-value',
+        'smoke-connection-string-value',
+        'smoke-fallback-opaque-value-12345'
+    )
+    $witnessOutput = (& $tool reproduce $break.findings[0].findingId --report (Join-Path $fixture 'break.json') --format json 2>&1 | Out-String)
+    foreach ($sensitiveValue in $sensitiveValues) {
         if ($breakOutput.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to console" }
         if ($breakJson.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to report" }
+        if ($witnessOutput.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to witness" }
+        foreach ($field in @(
+            [string]$break.findings[0].candidateResult.summary,
+            [string]$break.findings[0].candidateResult.normalizedSignature,
+            [string]$break.findings[0].witness.focusedFailure,
+            [string]$break.findings[0].witness.normalizedFailureSignature
+        )) {
+            if ($field.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to a report diagnostic field" }
+        }
     }
+
+    $credentialFeedSecret = 'smoke-feed-secret-value'
+    $credentialConfig = Join-Path $fixture 'credential-feed.json'
+    Set-Content -LiteralPath $credentialConfig -Value @"
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [{ "kind": "nuget-prerelease", "package": "CompatRadar.TestDependency", "candidates": ["1.0.0"], "feed": "https://feed.example/v3/index.json?apiKey=$credentialFeedSecret" }],
+  "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": ".", "timeoutSeconds": 120 },
+  "policy": { "confirmationRuns": 1 }
+}
+"@
+    $credentialOutput = (& $tool config validate --config $credentialConfig --format json 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 2) { throw 'credential-bearing feed URL was accepted by the installed package' }
+    if ($credentialOutput.IndexOf($credentialFeedSecret, [StringComparison]::Ordinal) -ge 0) { throw 'installed package leaked a rejected feed credential' }
+    if (Test-Path -LiteralPath (Join-Path $fixture 'credential-feed-report.json')) { throw 'credential-bearing feed validation wrote a report' }
 
     Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'baseline'
     $baselineConfig = $baseConfig.Replace('"8.0.424"', '"9.0.120"')
