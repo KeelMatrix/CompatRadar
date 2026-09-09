@@ -70,11 +70,11 @@ if (behavior == "" && candidate && version == "9.0.120") {
     $tool = Join-Path $toolPath $toolName
     if (-not (Test-Path -LiteralPath $tool)) { throw "Installed CompatRadar tool was not found at $tool." }
     Push-Location -LiteralPath $fixture
-    & $tool check --config $config --format json --report (Join-Path $fixture 'stable.json')
+    & $tool check --config (Split-Path -Leaf $config) --format json --report 'stable.json'
     if ($LASTEXITCODE -ne 0) { throw 'stable-identical package consumer smoke failed' }
 
     (Get-Content -Raw -LiteralPath $config).Replace('"8.0.424"', '"9.0.120"') | Set-Content -LiteralPath $config
-    $breakOutput = (& $tool check --config $config --format json --report (Join-Path $fixture 'break.json') 2>&1 | Out-String)
+    $breakOutput = (& $tool check --config (Split-Path -Leaf $config) --format json --report 'break.json' 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 1) { throw 'planted future-break package consumer smoke failed' }
 
     $stable = Get-Content -Raw -LiteralPath (Join-Path $fixture 'stable.json') | ConvertFrom-Json
@@ -96,7 +96,7 @@ if (behavior == "" && candidate && version == "9.0.120") {
         'smoke-connection-string-value',
         'smoke-fallback-opaque-value-12345'
     )
-    $witnessOutput = (& $tool reproduce $break.findings[0].findingId --report (Join-Path $fixture 'break.json') --format json 2>&1 | Out-String)
+    $witnessOutput = (& $tool reproduce $break.findings[0].findingId --report 'break.json' --format json 2>&1 | Out-String)
     foreach ($sensitiveValue in $sensitiveValues) {
         if ($breakOutput.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to console" }
         if ($breakJson.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to report" }
@@ -122,7 +122,7 @@ if (behavior == "" && candidate && version == "9.0.120") {
   "policy": { "confirmationRuns": 1 }
 }
 "@
-    $credentialOutput = (& $tool config validate --config $credentialConfig --format json 2>&1 | Out-String)
+    $credentialOutput = (& $tool config validate --config (Split-Path -Leaf $credentialConfig) --format json 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 2) { throw 'credential-bearing feed URL was accepted by the installed package' }
     if ($credentialOutput.IndexOf($credentialFeedSecret, [StringComparison]::Ordinal) -ge 0) { throw 'installed package leaked a rejected feed credential' }
     if (Test-Path -LiteralPath (Join-Path $fixture 'credential-feed-report.json')) { throw 'credential-bearing feed validation wrote a report' }
@@ -139,11 +139,11 @@ if (behavior == "" && candidate && version == "9.0.120") {
   "policy": { "confirmationRuns": 1 }
 }
 "@
-    $malformedValidationOutput = (& $tool config validate --config $malformedConfig --format json 2>&1 | Out-String)
+    $malformedValidationOutput = (& $tool config validate --config (Split-Path -Leaf $malformedConfig) --format json 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 2) { throw 'wrong-typed optional feed was accepted by the installed package during config validation' }
     if ($malformedValidationOutput.IndexOf($malformedFeedSecret, [StringComparison]::Ordinal) -ge 0 -or $malformedValidationOutput.IndexOf($malformedFeedUrl, [StringComparison]::Ordinal) -ge 0) { throw 'installed package echoed a malformed feed value during config validation' }
     $malformedReport = Join-Path $fixture 'malformed-feed-report.json'
-    $malformedCheckOutput = (& $tool check --config $malformedConfig --format json --report $malformedReport 2>&1 | Out-String)
+    $malformedCheckOutput = (& $tool check --config (Split-Path -Leaf $malformedConfig) --format json --report (Split-Path -Leaf $malformedReport) 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 2) { throw 'wrong-typed optional feed was accepted by the installed package during check' }
     if ($malformedCheckOutput.IndexOf($malformedFeedSecret, [StringComparison]::Ordinal) -ge 0 -or $malformedCheckOutput.IndexOf($malformedFeedUrl, [StringComparison]::Ordinal) -ge 0) { throw 'installed package echoed a malformed feed value during check' }
     if (Test-Path -LiteralPath $malformedReport) { throw 'wrong-typed optional feed check wrote a report' }
@@ -151,7 +151,7 @@ if (behavior == "" && candidate && version == "9.0.120") {
     Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'baseline'
     $baselineConfig = $baseConfig.Replace('"8.0.424"', '"9.0.120"')
     Set-Content -LiteralPath $config -Value $baselineConfig
-    & $tool check --config $config --format json --report (Join-Path $fixture 'baseline.json') | Out-Host
+    & $tool check --config (Split-Path -Leaf $config) --format json --report 'baseline.json' | Out-Host
     if ($LASTEXITCODE -ne 2) { throw 'baseline-failure package consumer smoke failed' }
     $baseline = Get-Content -Raw -LiteralPath (Join-Path $fixture 'baseline.json') | ConvertFrom-Json
     if ($baseline.exitCode -ne 2 -or $baseline.watches[0].comparisons[0].classification -ne 'INCONCLUSIVE_BASELINE_FAILED') { throw 'baseline report mismatch' }
@@ -159,7 +159,7 @@ if (behavior == "" && candidate && version == "9.0.120") {
     Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'flaky'
     $flakyConfig = $baselineConfig.Replace('"confirmationRuns": 1', '"confirmationRuns": 2')
     Set-Content -LiteralPath $config -Value $flakyConfig
-    & $tool check --config $config --format json --report (Join-Path $fixture 'flaky.json') | Out-Host
+    & $tool check --config (Split-Path -Leaf $config) --format json --report 'flaky.json' | Out-Host
     if ($LASTEXITCODE -ne 2) { throw 'flaky package consumer smoke failed' }
     $flaky = Get-Content -Raw -LiteralPath (Join-Path $fixture 'flaky.json') | ConvertFrom-Json
     if ($flaky.exitCode -ne 2 -or $flaky.watches[0].comparisons[0].classification -ne 'INCONCLUSIVE_FLAKY') { throw 'flaky report mismatch' }
