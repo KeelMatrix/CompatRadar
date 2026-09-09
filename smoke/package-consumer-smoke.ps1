@@ -125,6 +125,27 @@ if (behavior == "" && candidate && version == "9.0.120") {
     if ($credentialOutput.IndexOf($credentialFeedSecret, [StringComparison]::Ordinal) -ge 0) { throw 'installed package leaked a rejected feed credential' }
     if (Test-Path -LiteralPath (Join-Path $fixture 'credential-feed-report.json')) { throw 'credential-bearing feed validation wrote a report' }
 
+    $malformedFeedSecret = 'smoke-malformed-feed-secret'
+    $malformedFeedUrl = "https://feed.example/v3/index.json?apiKey=$malformedFeedSecret"
+    $malformedConfig = Join-Path $fixture 'malformed-feed.json'
+    Set-Content -LiteralPath $malformedConfig -Value @"
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [{ "kind": "nuget-prerelease", "package": "CompatRadar.TestDependency", "candidates": ["1.0.0"], "feed": { "url": "$malformedFeedUrl" } }],
+  "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": ".", "timeoutSeconds": 120 },
+  "policy": { "confirmationRuns": 1 }
+}
+"@
+    $malformedValidationOutput = (& $tool config validate --config $malformedConfig --format json 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 2) { throw 'wrong-typed optional feed was accepted by the installed package during config validation' }
+    if ($malformedValidationOutput.IndexOf($malformedFeedSecret, [StringComparison]::Ordinal) -ge 0 -or $malformedValidationOutput.IndexOf($malformedFeedUrl, [StringComparison]::Ordinal) -ge 0) { throw 'installed package echoed a malformed feed value during config validation' }
+    $malformedReport = Join-Path $fixture 'malformed-feed-report.json'
+    $malformedCheckOutput = (& $tool check --config $malformedConfig --format json --report $malformedReport 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 2) { throw 'wrong-typed optional feed was accepted by the installed package during check' }
+    if ($malformedCheckOutput.IndexOf($malformedFeedSecret, [StringComparison]::Ordinal) -ge 0 -or $malformedCheckOutput.IndexOf($malformedFeedUrl, [StringComparison]::Ordinal) -ge 0) { throw 'installed package echoed a malformed feed value during check' }
+    if (Test-Path -LiteralPath $malformedReport) { throw 'wrong-typed optional feed check wrote a report' }
+
     Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'baseline'
     $baselineConfig = $baseConfig.Replace('"8.0.424"', '"9.0.120"')
     Set-Content -LiteralPath $config -Value $baselineConfig

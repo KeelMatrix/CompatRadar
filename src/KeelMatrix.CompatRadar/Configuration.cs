@@ -126,7 +126,7 @@ internal static class ConfigurationLoader
             }
 
             RejectUnknown(element, WatchProperties, $"watch[{index}]", errors);
-            var id = ReadOptionalString(element, "id") ?? $"watch-{index:000}";
+            var id = ReadOptionalString(element, "id", $"watch[{index}]", errors) ?? $"watch-{index:000}";
             if (string.IsNullOrWhiteSpace(id) || id.Length > 64 || !ids.Add(id))
             {
                 errors.Add($"watch[{index}].id must be unique and contain 1-64 characters.");
@@ -135,8 +135,8 @@ internal static class ConfigurationLoader
             var kindText = ReadRequiredString(element, "kind", $"watch[{index}]", errors);
             var kind = ParseWatchKind(kindText, index, errors);
             var candidates = ReadCandidateArray(element, index, errors);
-            var package = ReadOptionalString(element, "package");
-            var feed = ReadOptionalString(element, "feed");
+            var package = ReadOptionalString(element, "package", $"watch[{index}]", errors);
+            var feed = ReadOptionalString(element, "feed", $"watch[{index}]", errors);
 
             if (feed is not null && !IsSafeFeed(feed))
             {
@@ -183,7 +183,7 @@ internal static class ConfigurationLoader
 
         RejectUnknown(element, ValidationProperties, "validation", errors);
         var command = ReadRequiredString(element, "command", "validation", errors);
-        var workingDirectory = ReadOptionalString(element, "workingDirectory") ?? ".";
+        var workingDirectory = ReadOptionalString(element, "workingDirectory", "validation", errors) ?? ".";
         var timeoutSeconds = ReadRequiredInt(element, "timeoutSeconds", "validation", errors);
         if (command is not null && (command.Contains('\0') || command.Length > 2000))
         {
@@ -319,9 +319,20 @@ internal static class ConfigurationLoader
         return value.GetString();
     }
 
-    private static string? ReadOptionalString(JsonElement parent, string name)
+    private static string? ReadOptionalString(JsonElement parent, string name, string context, List<string> errors)
     {
-        return parent.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        if (!parent.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (value.ValueKind != JsonValueKind.String)
+        {
+            errors.Add($"{context}.{name} must be a string when specified.");
+            return null;
+        }
+
+        return value.GetString();
     }
 
     private static int? ReadRequiredInt(JsonElement parent, string name, string context, List<string> errors)

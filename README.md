@@ -87,7 +87,7 @@ Schema version `1` has these fields:
 - `validation.timeoutSeconds`: bounded command timeout from 1 through 86400 seconds.
 - `policy.confirmationRuns`: 1 through 5 attempts for the stable control and each candidate.
 
-Candidate versions must be parseable NuGet-style versions. Duplicate or ambiguous versions fail configuration validation before any command is run. Candidates are ordered deterministically by core version and prerelease precedence.
+Candidate versions must be parseable NuGet-style versions. Duplicate or ambiguous versions fail configuration validation before any command is run. Candidates are ordered deterministically by core version and prerelease precedence. Optional string fields must be strings when present; JSON `null` means omitted, while wrong-typed optional fields (including `feed`) fail configuration validation with exit code `2` before any command runs or report is written.
 
 ## Stable control and result states
 
@@ -148,7 +148,7 @@ The wrapper invokes the same `compat-radar check` command, appends the report to
 
 ## Security and privacy
 
-CompatRadar executes the configured repository restore/build/test command and is not a sandbox. Run it only in a trusted local or CI environment. Comparisons use safe temporary directories, do not follow reparse points, do not mutate the active worktree, bound process time and captured output, terminate process trees after timeout/cancellation, reject malformed candidate definitions, and sanitize diagnostics. Optional feed URLs with credential-bearing user-info or query parameters are rejected; URL-embedded secrets are unsupported. Use environment-based authentication or a NuGet credential provider for private feeds. Accepted feed URLs and captured diagnostics are never printed with credential values.
+CompatRadar executes the configured repository restore/build/test command and is not a sandbox. Run it only in a trusted local or CI environment. Comparisons use safe temporary directories, do not follow reparse points, do not mutate the active worktree, bound process time and captured output, terminate process trees after timeout/cancellation, reject malformed candidate definitions and wrong-typed optional fields, and sanitize diagnostics. Optional feed URLs with credential-bearing user-info or query parameters are rejected; URL-embedded secrets are unsupported. Use environment-based authentication or a NuGet credential provider for private feeds. Accepted feed URLs and captured diagnostics are never printed with credential values.
 
 Telemetry uses `KeelMatrix.Telemetry` only after the first trustworthy stable-versus-future comparison. It is best-effort, pseudonymous, and at most weekly. It never receives package choices, versions, repository names, paths, commands, test names, logs, source, environment variables, secrets, URLs, or reports. Set `KEELMATRIX_NO_TELEMETRY=1` to opt out. Local KeelMatrix development and CI should set that variable.
 

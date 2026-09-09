@@ -68,6 +68,53 @@ public sealed class ReportAndCliTests
     }
 
     [Fact]
+    public async Task MalformedOptionalFeedFailsClosedForValidationAndCheckWithoutReport()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "pass", "\"1.0.0\"");
+            var configurationPath = Path.Combine(root, "compat-radar.json");
+            var configuration = File.ReadAllText(configurationPath).Replace(
+                "\"candidates\": [\"1.0.0\"]",
+                "\"candidates\": [\"1.0.0\"], \"feed\": { \"url\": \"https://feed.example/secret-feed\" }",
+                StringComparison.Ordinal);
+            File.WriteAllText(configurationPath, configuration);
+
+            var validationOutput = new StringWriter();
+            var validationError = new StringWriter();
+            var validationExitCode = await RadarApplication.RunAsync(
+                ["config", "validate", "--format", "json"],
+                root,
+                new RecordingTelemetry(),
+                validationOutput,
+                validationError);
+
+            Assert.Equal(2, validationExitCode);
+            Assert.Contains("watch[1].feed must be a string", validationOutput.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain("secret-feed", validationOutput.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, validationError.ToString());
+
+            var reportPath = Path.Combine(root, "malformed-feed-report.json");
+            var checkOutput = new StringWriter();
+            var checkError = new StringWriter();
+            var checkExitCode = await RadarApplication.RunAsync(
+                ["check", "--format", "json", "--report", Path.GetFileName(reportPath)],
+                root,
+                new RecordingTelemetry(),
+                checkOutput,
+                checkError);
+
+            Assert.Equal(2, checkExitCode);
+            Assert.Contains("watch[1].feed must be a string", checkOutput.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain("secret-feed", checkOutput.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, checkError.ToString());
+            Assert.False(File.Exists(reportPath));
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
     public async Task SecretLikeDiagnosticsNeverLeakIntoConsoleReportSignaturesOrWitness()
     {
         var root = TestFixture.CreateRepository("secret-diagnostic");

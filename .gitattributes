@@ -1,0 +1,11 @@
+# Keep source, documentation, and scripts LF-normalized in every checkout.
+* text=auto eol=lf
+
+# Binary assets must never be newline-normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.zip binary
+*.nupkg binary
+*.snupkg binary

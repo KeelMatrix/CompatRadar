@@ -56,6 +56,31 @@ public sealed class ConfigurationTests
         finally { TestFixture.DeleteRepository(root); }
     }
 
+    [Fact]
+    public void RejectsWrongTypeForOptionalFeedWithoutEchoingItsValue()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "compat-radar.json"), """
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [{ "kind": "nuget-prerelease", "package": "CompatRadar.TestDependency", "candidates": ["1.0.0"], "feed": { "url": "https://feed.example/secret-feed" } }],
+  "validation": { "command": "dotnet test", "workingDirectory": ".", "timeoutSeconds": 30 },
+  "policy": { "confirmationRuns": 1 }
+}
+""");
+
+            var result = ConfigurationLoader.Load(root, "compat-radar.json");
+
+            Assert.False(result.IsValid);
+            Assert.Contains(result.Errors, error => error.Contains("watch[1].feed must be a string", StringComparison.Ordinal));
+            Assert.DoesNotContain("secret-feed", string.Join('\n', result.Errors), StringComparison.Ordinal);
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
     [Theory]
     [InlineData("https://feed.example/v3/index.json?apiKey=feed-secret")]
     [InlineData("https://feed.example/v3/index.json?client_secret=feed-secret")]
