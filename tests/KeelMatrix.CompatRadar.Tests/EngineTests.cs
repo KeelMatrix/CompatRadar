@@ -156,4 +156,21 @@ public sealed class EngineTests
         }
         finally { TestFixture.DeleteRepository(root); }
     }
+
+    [Fact]
+    public async Task OutputCaptureRemainsBoundedAcrossValidationFailures()
+    {
+        var root = TestFixture.CreateRepository("output-bound");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "output-bound", "\"1.1.0\"", confirmationRuns: 1);
+            var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
+            var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+            var attempt = Assert.Single(result.Report.Watches[0].Comparisons[0].CandidateResult.Attempts);
+
+            Assert.Equal(ResultClassification.FutureRegression, result.Report.Watches[0].Comparisons[0].Classification);
+            Assert.True(attempt.NormalizedSignature.Length <= RadarContract.OutputLimitBytes);
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
 }

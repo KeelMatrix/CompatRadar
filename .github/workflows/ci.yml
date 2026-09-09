@@ -1,0 +1,291 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  KEELMATRIX_NO_TELEMETRY: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  validate:
+    name: Validate / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up pinned .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.424
+
+      - name: Configure macOS temporary directory
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          temp_directory="$RUNNER_TEMP/compatradar"
+          mkdir -p "$temp_directory"
+          echo "TMPDIR=$temp_directory/" >> "$GITHUB_ENV"
+
+      - name: Verify CI telemetry suppression
+        shell: pwsh
+        run: |
+          if ($env:KEELMATRIX_NO_TELEMETRY -ne '1') { throw 'KEELMATRIX_NO_TELEMETRY must be 1 in CI.' }
+
+      - name: Snapshot telemetry state
+        shell: pwsh
+        run: |
+          function Get-TelemetryFiles {
+            $bases = @(
+              [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData),
+              [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData),
+              [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile),
+              [IO.Path]::GetTempPath()
+            ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+            foreach ($base in $bases) {
+              $roots = @(
+                (Join-Path $base 'KeelMatrix'),
+                (Join-Path $base '.local/share/KeelMatrix'),
+                (Join-Path $base '.config/KeelMatrix'),
+                (Join-Path $base '.cache/KeelMatrix')
+              ) | Select-Object -Unique
+              foreach ($root in $roots) {
+                if (Test-Path -LiteralPath $root) {
+                  Get-ChildItem -LiteralPath $root -Recurse -Force -File -ErrorAction SilentlyContinue |
+                    Select-Object -ExpandProperty FullName
+                }
+              }
+            }
+          }
+
+          @(Get-TelemetryFiles | Sort-Object) | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP "compatradar-telemetry-before-$env:GITHUB_RUN_ID.txt") -Encoding utf8
+
+      - name: Restore
+        run: dotnet restore KeelMatrix.CompatRadar.sln --configfile NuGet.config
+
+      - name: Build Release with warnings as errors
+        run: dotnet build KeelMatrix.CompatRadar.sln -c Release --no-restore -warnaserror
+
+      - name: Verify formatting with restore
+        run: dotnet format KeelMatrix.CompatRadar.sln --verify-no-changes
+
+      - name: Run full test suite
+        shell: pwsh
+        run: |
+          dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --logger "trx;LogFileName=compatradar-${{ matrix.os }}.trx" --results-directory ./artifacts/test-results
+          if ($LASTEXITCODE -ne 0) { throw "CompatRadar tests failed on ${{ matrix.os }}." }
+
+      - name: Check dependency vulnerabilities (best effort)
+        shell: pwsh
+        run: |
+          $output = (& dotnet list KeelMatrix.CompatRadar.sln package --vulnerable --include-transitive 2>&1 | Out-String)
+          $status = $LASTEXITCODE
+          $output | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($status -ne 0) {
+            if ($output -match '(?i)(NU1900|NU1301|unable to load the service index|audit.*(unavailable|service)|timed out|network)') {
+              "Dependency vulnerability service was unreachable on ${{ matrix.os }}; the check is recorded as unavailable. NuGetAudit=false remains set in Directory.Build.props." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+              exit 0
+            }
+            throw "Unexpected dependency vulnerability command failure on ${{ matrix.os }} (exit $status)."
+          }
+          if ($output -match '(?i)has the following vulnerable package') {
+            throw "Vulnerable dependencies were reported on ${{ matrix.os }}."
+          }
+
+      - name: Assert temporary comparison state was cleaned
+        shell: pwsh
+        run: |
+          $tempRoot = [IO.Path]::GetTempPath()
+          $leftovers = @()
+          foreach ($name in @('compat-radar', 'compat-radar-tests', 'compat-radar-sdk-test', 'compat-radar-crlf', 'compat-radar-links')) {
+            $path = Join-Path $tempRoot $name
+            if (Test-Path -LiteralPath $path) {
+              $leftovers += @(Get-ChildItem -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+            }
+          }
+          if ($leftovers.Count -gt 0) { throw "Temporary CompatRadar state was not cleaned: $($leftovers -join ', ')" }
+
+      - name: Assert no telemetry artifacts were produced
+        shell: pwsh
+        run: |
+          function Get-TelemetryFiles {
+            $bases = @(
+              [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData),
+              [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData),
+              [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile),
+              [IO.Path]::GetTempPath()
+            ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+            foreach ($base in $bases) {
+              $roots = @(
+                (Join-Path $base 'KeelMatrix'),
+                (Join-Path $base '.local/share/KeelMatrix'),
+                (Join-Path $base '.config/KeelMatrix'),
+                (Join-Path $base '.cache/KeelMatrix')
+              ) | Select-Object -Unique
+              foreach ($root in $roots) {
+                if (Test-Path -LiteralPath $root) {
+                  Get-ChildItem -LiteralPath $root -Recurse -Force -File -ErrorAction SilentlyContinue |
+                    Select-Object -ExpandProperty FullName
+                }
+              }
+            }
+          }
+          $beforePath = Join-Path $env:RUNNER_TEMP "compatradar-telemetry-before-$env:GITHUB_RUN_ID.txt"
+          $before = @(Get-Content -LiteralPath $beforePath -ErrorAction SilentlyContinue)
+          $after = @(Get-TelemetryFiles | Sort-Object)
+          $newFiles = @($after | Where-Object { $before -notcontains $_ })
+          if ($newFiles.Count -gt 0) { throw "Telemetry artifacts were produced in CI: $($newFiles -join ', ')" }
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.os }}
+          path: artifacts/test-results
+          if-no-files-found: error
+
+  package:
+    name: Package / inspect
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up pinned .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.424
+
+      - name: Verify CI telemetry suppression
+        shell: pwsh
+        run: |
+          if ($env:KEELMATRIX_NO_TELEMETRY -ne '1') { throw 'KEELMATRIX_NO_TELEMETRY must be 1 in CI.' }
+
+      - name: Restore
+        run: dotnet restore KeelMatrix.CompatRadar.sln --configfile NuGet.config
+
+      - name: Build Release with warnings as errors
+        run: dotnet build KeelMatrix.CompatRadar.sln -c Release --no-restore -warnaserror
+
+      - name: Pack the exact tool and symbols
+        shell: pwsh
+        run: |
+          $packageDirectory = Join-Path $PWD 'artifacts/packages'
+          if (Test-Path -LiteralPath $packageDirectory) { Remove-Item -LiteralPath $packageDirectory -Recurse -Force }
+          New-Item -ItemType Directory -Path $packageDirectory | Out-Null
+          dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build --no-restore --include-symbols --p:SymbolPackageFormat=snupkg --output $packageDirectory
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet pack failed.' }
+
+      - name: Validate package set and contents
+        shell: pwsh
+        run: |
+          $packageDirectory = Join-Path $PWD 'artifacts/packages'
+          $expected = @('KeelMatrix.CompatRadar.0.1.0.nupkg', 'KeelMatrix.CompatRadar.0.1.0.snupkg') | Sort-Object
+          $actual = @(Get-ChildItem -LiteralPath $packageDirectory -File | Select-Object -ExpandProperty Name | Sort-Object)
+          if (($expected -join "`n") -ne ($actual -join "`n")) { throw "Unexpected package set. Expected: $($expected -join ', '); actual: $($actual -join ', ')." }
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $forbiddenPath = '(?i)(^|/)(AGENTS\.md|\.env(?:\.local)?|local-telemetry|tests?|testresults|artifacts|obj|bin|\.vs|\.vscode)(/|$)'
+          $forbiddenText = '(?i)(?:password|api[_-]?key|secret)\s*='
+          $textExtensions = @('.nuspec', '.md', '.txt', '.json', '.xml', '.props', '.targets', '.cs', '.csproj')
+          foreach ($package in Get-ChildItem -LiteralPath $packageDirectory -File) {
+            $archive = [IO.Compression.ZipFile]::OpenRead($package.FullName)
+            try {
+              foreach ($entry in $archive.Entries) {
+                $entryName = $entry.FullName.Replace('\', '/')
+                if ($entryName -match $forbiddenPath) { throw "Forbidden package path '$entryName' found in $($package.Name)." }
+                if ($textExtensions -contains ([IO.Path]::GetExtension($entryName).ToLowerInvariant()) -and $entry.Length -gt 0) {
+                  $reader = [IO.StreamReader]::new($entry.Open())
+                  try { $content = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                  if ($content -match $forbiddenText) { throw "Internal-only text found in $($package.Name): $entryName." }
+                }
+              }
+              if ($package.Name -like '*.nupkg') {
+                foreach ($required in @('README.md', 'LICENSE', 'icon.png')) {
+                  if ($null -eq $archive.GetEntry($required)) { throw "Required package entry '$required' is missing from $($package.Name)." }
+                }
+              }
+            }
+            finally { $archive.Dispose() }
+          }
+
+      - name: Upload packed tool for cross-platform consumer smoke
+        uses: actions/upload-artifact@v7
+        with:
+          name: compatradar-package
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
+            artifacts/packages/KeelMatrix.CompatRadar.0.1.0.snupkg
+
+  package-consumer-smoke:
+    name: Package consumer smoke / ${{ matrix.os }}
+    needs: package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up pinned .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.424
+
+      - name: Download packed tool
+        uses: actions/download-artifact@v7
+        with:
+          name: compatradar-package
+          path: ./artifacts/packages
+
+      - name: Run isolated package-consumer smoke
+        shell: pwsh
+        run: pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath ./artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
+
+      - name: Assert smoke temporary state was cleaned
+        shell: pwsh
+        run: |
+          $leftovers = @(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory -Filter 'compat-radar-consumer-*' -ErrorAction SilentlyContinue)
+          if ($leftovers.Count -gt 0) { throw "Package smoke temporary state was not cleaned: $($leftovers.FullName -join ', ')" }
+
+      - name: Assert no telemetry artifacts were produced
+        shell: pwsh
+        run: |
+          $bases = @(
+            [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData),
+            [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData),
+            [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile),
+            [IO.Path]::GetTempPath()
+          ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+          $telemetryFiles = @()
+          foreach ($base in $bases) {
+            foreach ($relativeRoot in @('KeelMatrix', '.local/share/KeelMatrix', '.config/KeelMatrix', '.cache/KeelMatrix')) {
+              $root = Join-Path $base $relativeRoot
+              if (Test-Path -LiteralPath $root) {
+                $telemetryFiles += @(Get-ChildItem -LiteralPath $root -Recurse -Force -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+              }
+            }
+          }
+          if ($telemetryFiles.Count -gt 0) { throw "Telemetry artifacts were produced in package smoke: $($telemetryFiles -join ', ')" }

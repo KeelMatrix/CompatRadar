@@ -144,7 +144,7 @@ The repository includes a composite Action wrapper. Install the tool in the job,
     report: artifacts/compat-radar-report.json
 ```
 
-The wrapper invokes the same `compat-radar check` command, appends the report to `GITHUB_STEP_SUMMARY`, and emits a workflow error annotation for exit code `1`. No hosted dashboard is required. This repository intentionally contains no CI workflow files.
+The wrapper invokes the same `compat-radar check` command, appends the report to `GITHUB_STEP_SUMMARY`, and emits a workflow error annotation for exit code `1`. No hosted dashboard is required. The repository CI workflow validates the supported Windows, Linux, and macOS operations and the packed-tool consumer path.
 
 ## Security and privacy
 
@@ -154,7 +154,7 @@ Telemetry uses `KeelMatrix.Telemetry` only after the first trustworthy stable-ve
 
 ## Support and limitations
 
-The tool targets `net8.0` and supports Windows, Linux, and macOS operations in the product design. The current local evidence covers Windows only; Linux/macOS execution and remote CI have not been run for this candidate. The v1 adapters are explicit NuGet prerelease package overrides and SDK preview selection through `global.json`; runtime-only preview selection is unsupported and rejected.
+The tool targets `net8.0` and supports Windows, Linux, and macOS operations. The repository CI workflow is the cross-platform evidence gate; local validation currently covers Windows until the public workflow completes. The v1 adapters are explicit NuGet prerelease package overrides and SDK preview selection through `global.json`; runtime-only preview selection is unsupported and rejected.
 
 CompatRadar does not manage dependencies, open update pull requests, discover all dependencies, run hosted builds, provide accounts or scheduling, send notifications, support non-.NET ecosystems, generate patches, or guarantee that every future incompatibility will be predicted.
 

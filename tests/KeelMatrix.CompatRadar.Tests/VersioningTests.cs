@@ -1,5 +1,7 @@
 namespace KeelMatrix.CompatRadar.Tests;
 
+using System.Globalization;
+
 public sealed class VersioningTests
 {
     [Fact]
@@ -23,5 +25,27 @@ public sealed class VersioningTests
     public void AcceptsSupportedCandidateShapes(string value)
     {
         Assert.True(Versioning.TryParse(value, out _));
+    }
+
+    [Fact]
+    public void CandidateOrderingIsCultureIndependent()
+    {
+        var previousCulture = CultureInfo.CurrentCulture;
+        var previousUiCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("tr-TR");
+            CultureInfo.CurrentUICulture = new CultureInfo("tr-TR");
+
+            var result = Versioning.Validate(["1.0.0-i", "1.0.0-I2", "1.0.0-1"]);
+
+            Assert.True(result.Accepted);
+            Assert.Equal(["1.0.0-1", "1.0.0-I2", "1.0.0-i"], result.OrderedCandidates);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+            CultureInfo.CurrentUICulture = previousUiCulture;
+        }
     }
 }

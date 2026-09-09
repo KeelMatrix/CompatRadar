@@ -15,7 +15,7 @@ $fixture = Join-Path $root 'fixture'
 New-Item -ItemType Directory -Path $toolPath, $fixture | Out-Null
 
 try {
-    dotnet tool install --tool-path $toolPath --add-source (Split-Path $package) KeelMatrix.CompatRadar --version 0.1.0 --no-cache --ignore-failed-sources | Out-Host
+    dotnet tool install --tool-path $toolPath --add-source (Split-Path $package) --configfile (Join-Path $PSScriptRoot '..' 'NuGet.config') KeelMatrix.CompatRadar --version 0.1.0 --no-cache --ignore-failed-sources | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'dotnet tool install failed' }
 
     Set-Content -LiteralPath (Join-Path $fixture 'global.json') -Value @'
@@ -66,7 +66,9 @@ if (behavior == "" && candidate && version == "9.0.120") {
 '@
     $baseConfig = Get-Content -Raw -LiteralPath $config
 
-    $tool = Join-Path $toolPath 'compat-radar.exe'
+    $toolName = if ($IsWindows) { 'compat-radar.exe' } else { 'compat-radar' }
+    $tool = Join-Path $toolPath $toolName
+    if (-not (Test-Path -LiteralPath $tool)) { throw "Installed CompatRadar tool was not found at $tool." }
     Push-Location -LiteralPath $fixture
     & $tool check --config $config --format json --report (Join-Path $fixture 'stable.json')
     if ($LASTEXITCODE -ne 0) { throw 'stable-identical package consumer smoke failed' }
