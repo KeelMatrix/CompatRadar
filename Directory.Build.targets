@@ -1,4 +1,10 @@
 <Project>
+  <PropertyGroup>
+    <!-- A fresh local checkout may have no remote yet; keep that expected state warning-free. -->
+    <PkgMicrosoft_Build_Tasks_Git></PkgMicrosoft_Build_Tasks_Git>
+    <PkgMicrosoft_SourceLink_Common></PkgMicrosoft_SourceLink_Common>
+  </PropertyGroup>
+
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="" Condition="Exists('$(MSBuildThisFileDirectory)README.md')" />
     <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="" Condition="Exists('$(MSBuildThisFileDirectory)LICENSE')" />
