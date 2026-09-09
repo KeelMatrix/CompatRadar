@@ -1,0 +1,25 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KeelMatrix.CompatRadar", "src\KeelMatrix.CompatRadar\KeelMatrix.CompatRadar.csproj", "{38D116DA-33A4-4F52-B5B7-10A07B9B0D6B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KeelMatrix.CompatRadar.Tests", "tests\KeelMatrix.CompatRadar.Tests\KeelMatrix.CompatRadar.Tests.csproj", "{0A2F11E4-5B19-4D25-857D-6B1B08E9D4CF}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{38D116DA-33A4-4F52-B5B7-10A07B9B0D6B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{38D116DA-33A4-4F52-B5B7-10A07B9B0D6B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{38D116DA-33A4-4F52-B5B7-10A07B9B0D6B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{38D116DA-33A4-4F52-B5B7-10A07B9B0D6B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0A2F11E4-5B19-4D25-857D-6B1B08E9D4CF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0A2F11E4-5B19-4D25-857D-6B1B08E9D4CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0A2F11E4-5B19-4D25-857D-6B1B08E9D4CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0A2F11E4-5B19-4D25-857D-6B1B08E9D4CF}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>compat-radar</ToolCommandName>
+    <PackageId>KeelMatrix.CompatRadar</PackageId>
+    <PackageType>DotnetTool</PackageType>
+    <AssemblyName>KeelMatrix.CompatRadar</AssemblyName>
+    <RootNamespace>KeelMatrix.CompatRadar</RootNamespace>
+    <Description>Test your .NET repository against future SDK, runtime, and NuGet candidates, confirm real breakage, and localize the first bad candidate before normal upgrade time.</Description>
+    <PackageTags>dotnet;dependencies;compatibility;ci;nuget;prerelease;sdk;runtime;regression-testing;dotnet-tool</PackageTags>
+    <PackageReleaseNotes>Initial release of the local future-compatibility comparison tool.</PackageReleaseNotes>
+    <PackageOutputPath>$(MSBuildProjectDirectory)\..\..\artifacts\packages\</PackageOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="KeelMatrix.Telemetry" />
+  </ItemGroup>
+
+</Project>

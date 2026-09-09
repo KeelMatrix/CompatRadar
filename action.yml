@@ -1,0 +1,17 @@
+name: CompatRadar
+description: Test a .NET repository against explicit future SDK/runtime or NuGet candidates.
+inputs:
+  config:
+    description: Repository-relative CompatRadar configuration path.
+    required: false
+    default: compat-radar.json
+  report:
+    description: Repository-relative report artifact path.
+    required: false
+    default: compat-radar-report.json
+runs:
+  using: composite
+  steps:
+    - name: Run CompatRadar
+      shell: bash
+      run: bash "${GITHUB_ACTION_PATH}/scripts/compat-radar-action.sh" "${{ inputs.config }}" "${{ inputs.report }}"
