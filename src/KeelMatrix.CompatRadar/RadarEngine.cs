@@ -209,7 +209,7 @@ internal sealed class RadarEngine
             watch.Package,
             candidate,
             watch.Feed,
-            watch.Kind == WatchKind.SdkPreview ? candidate : null,
+            watch.Kind is WatchKind.SdkPreview or WatchKind.RuntimePreview ? candidate : null,
             future.Summary,
             future.NormalizedSignature,
             future.Fingerprint,
@@ -232,7 +232,19 @@ internal sealed class RadarEngine
         string? restoreCommand = null;
         if (IsDotnetCommand(validationCommand))
         {
-            var restoreCommandParsed = BuildRestoreCommand(validationCommand, materializedRoot, feed);
+            if (!string.IsNullOrWhiteSpace(feed))
+            {
+                var feedResult = MaterializationScope.AddCandidateFeed(materializedRoot, feed);
+                if (!feedResult.Applied)
+                {
+                    return CreateExecutionFailureEvidence(
+                        validationCommand,
+                        configuration.Validation.WorkingDirectory,
+                        feedResult.Error ?? "The candidate feed could not be configured in the isolated repository copy.");
+                }
+            }
+
+            var restoreCommandParsed = BuildRestoreCommand(validationCommand, materializedRoot);
             restoreCommand = restoreCommandParsed.Display.Replace(Path.Combine(materializedRoot, ".packages"), "<isolated-packages>", StringComparison.OrdinalIgnoreCase);
             restore = await ProcessRunner.RunAsync(
                 restoreCommandParsed,
@@ -243,7 +255,7 @@ internal sealed class RadarEngine
             if (restore.ExitCode != 0)
             {
                 return new RunEvidence(
-                    "INCONCLUSIVE_EXECUTION",
+                    restore.FailureKind == "unsupported-environment" ? "UNSUPPORTED" : "INCONCLUSIVE_EXECUTION",
                     candidate is not null,
                     validationCommand.Display,
                     configuration.Validation.WorkingDirectory,
@@ -270,13 +282,19 @@ internal sealed class RadarEngine
             }
         }
 
+        var failures = attempts.Where(attempt => attempt.ExitCode != 0).ToArray();
+        var sameFailure = failures.Length > 0
+            && failures.All(attempt => attempt.Fingerprint == failures[0].Fingerprint
+                && attempt.NormalizedSignature == failures[0].NormalizedSignature);
         var classification = attempts.All(attempt => attempt.ExitCode == 0)
             ? "PASS"
             : attempts.Any(attempt => attempt.TimedOut || attempt.Cancelled || attempt.FailureKind == "process-launch-failed")
                 ? "INCONCLUSIVE_EXECUTION"
                 : attempts.Any(attempt => attempt.ExitCode == 0)
                     ? "INCONCLUSIVE_FLAKY"
-                    : "FAIL";
+                    : failures.All(attempt => attempt.FailureKind == "unsupported-environment")
+                        ? "UNSUPPORTED"
+                        : sameFailure ? "FAIL" : "INCONCLUSIVE_FLAKY";
         var representative = attempts.FirstOrDefault(attempt => attempt.ExitCode != 0) ?? attempts[0];
         return new RunEvidence(
             classification,
@@ -323,7 +341,7 @@ internal sealed class RadarEngine
         return verb is "build" or "msbuild" or "pack" or "publish" or "run" or "test";
     }
 
-    private static ParsedCommand BuildRestoreCommand(ParsedCommand validationCommand, string materializedRoot, string? feed)
+    private static ParsedCommand BuildRestoreCommand(ParsedCommand validationCommand, string materializedRoot)
     {
         var arguments = new List<string> { "restore" };
         var target = validationCommand.Arguments.FirstOrDefault(argument =>
@@ -334,12 +352,6 @@ internal sealed class RadarEngine
         arguments.Add("--nologo");
         arguments.Add("--packages");
         arguments.Add(Path.Combine(materializedRoot, ".packages"));
-        if (!string.IsNullOrWhiteSpace(feed))
-        {
-            arguments.Add("--source");
-            arguments.Add(feed);
-        }
-
         return new ParsedCommand(validationCommand.FileName, arguments);
     }
 
@@ -382,6 +394,7 @@ internal sealed class RadarEngine
             "PASS" => ResultClassification.Compatible,
             "FAIL" => ResultClassification.FutureRegression,
             "INCONCLUSIVE_FLAKY" => ResultClassification.InconclusiveFlaky,
+            "UNSUPPORTED" => ResultClassification.Unsupported,
             _ => ResultClassification.InconclusiveExecution
         };
     }
@@ -390,6 +403,7 @@ internal sealed class RadarEngine
     {
         WatchKind.NuGetPrerelease => "nuget-prerelease",
         WatchKind.SdkPreview => "sdk-preview",
+        WatchKind.RuntimePreview => "runtime-preview",
         _ => "unsupported"
     };
 

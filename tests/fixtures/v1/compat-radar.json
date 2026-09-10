@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [
+    {
+      "id": "package-watch",
+      "kind": "nuget-prerelease",
+      "package": "Example.Dependency",
+      "candidates": ["1.0.0-rc.1", "1.0.0-rc.2"]
+    },
+    {
+      "id": "runtime-watch",
+      "kind": "runtime-preview",
+      "candidates": ["10.0.0-preview.1.12345.1"]
+    }
+  ],
+  "validation": {
+    "command": "dotnet test -c Release",
+    "workingDirectory": ".",
+    "timeoutSeconds": 900
+  },
+  "policy": { "confirmationRuns": 2 }
+}

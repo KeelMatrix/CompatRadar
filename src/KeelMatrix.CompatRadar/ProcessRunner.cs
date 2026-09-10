@@ -176,13 +176,26 @@ internal static class ProcessRunner
                 ? timedOut ? "process timed out" : cancelled ? "process cancelled" : "no diagnostic"
                 : normalized;
             var exitCode = timedOut || cancelled ? -1 : process.ExitCode;
+            if (exitCode != 0 && !timedOut && !cancelled)
+            {
+                signature = $"exit code {exitCode}: {signature}";
+            }
             var summary = Sanitize(FindUsefulLine($"{stderr}\n{stdout}") ?? signature, workingDirectory);
+            var failureKind = timedOut
+                ? "timeout"
+                : cancelled
+                    ? "cancellation"
+                    : exitCode == 0
+                        ? null
+                        : LooksUnsupportedEnvironment(normalized)
+                            ? "unsupported-environment"
+                            : "exit-code";
             return new ProcessExecutionResult(
                 exitCode,
                 timedOut,
                 cancelled,
                 timedOut || cancelled,
-                timedOut ? "timeout" : cancelled ? "cancellation" : exitCode == 0 ? null : "exit-code",
+                failureKind,
                 command.Display,
                 workingDirectory,
                 Redact(stdout),
@@ -278,6 +291,17 @@ internal static class ProcessRunner
     private static string Fingerprint(string normalized)
     {
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)))[..16];
+    }
+
+    private static bool LooksUnsupportedEnvironment(string normalized)
+    {
+        return normalized.Contains("A compatible installed .NET SDK for global.json version", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("A compatible .NET SDK was not found", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("Requested SDK version", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("The framework 'Microsoft.NETCore.App'", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("It was not possible to find any compatible framework version", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("The specified framework", StringComparison.OrdinalIgnoreCase) && normalized.Contains("was not found", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("The required library", StringComparison.OrdinalIgnoreCase) && normalized.Contains("was not found", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<string> ReadBoundedAsync(Stream stream, int limit)

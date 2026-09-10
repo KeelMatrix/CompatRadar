@@ -10,7 +10,7 @@
     <AssemblyName>KeelMatrix.CompatRadar</AssemblyName>
     <RootNamespace>KeelMatrix.CompatRadar</RootNamespace>
     <Description>Test your .NET repository against future SDK and NuGet candidates, confirm real breakage, and localize the first bad candidate before normal upgrade time.</Description>
-    <PackageTags>dotnet;dependencies;compatibility;ci;nuget;prerelease;sdk;regression-testing;dotnet-tool</PackageTags>
+    <PackageTags>dotnet;dependencies;compatibility;ci;nuget;prerelease;sdk;runtime;regression-testing;dotnet-tool</PackageTags>
     <PackageReleaseNotes>Initial release of the local future-compatibility comparison tool.</PackageReleaseNotes>
     <PackageOutputPath>$(MSBuildProjectDirectory)\..\..\artifacts\packages\</PackageOutputPath>
   </PropertyGroup>

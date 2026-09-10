@@ -153,7 +153,7 @@ internal static class ConfigurationLoader
             }
             else if (package is not null || feed is not null)
             {
-                errors.Add($"watch[{index}] SDK previews cannot specify package or feed.");
+                errors.Add($"watch[{index}] SDK/runtime previews cannot specify package or feed.");
             }
 
             if (candidates is not null)
@@ -232,9 +232,14 @@ internal static class ConfigurationLoader
             return WatchKind.SdkPreview;
         }
 
+        if (value is "runtime-preview")
+        {
+            return WatchKind.RuntimePreview;
+        }
+
         if (value is not null)
         {
-            errors.Add($"watch[{index}].kind must be 'nuget-prerelease' or 'sdk-preview'.");
+            errors.Add($"watch[{index}].kind must be 'nuget-prerelease', 'sdk-preview', or 'runtime-preview'.");
         }
 
         return null;
@@ -371,6 +376,10 @@ internal static class ConfigurationLoader
 
 internal static class PathUtilities
 {
+    private static StringComparison PathComparison => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
     public static string ResolveUnderRoot(string root, string path)
     {
         return Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(root, path));
@@ -378,10 +387,16 @@ internal static class PathUtilities
 
     public static bool IsWithinRoot(string root, string path)
     {
-        var normalizedRoot = EnsureTrailingSeparator(Path.GetFullPath(root));
-        var normalizedPath = Path.GetFullPath(path);
-        return normalizedPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(normalizedPath, normalizedRoot.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+        var normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normalizedPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!string.Equals(normalizedPath, normalizedRoot, PathComparison)
+            && !normalizedPath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, PathComparison)
+            && !normalizedPath.StartsWith(normalizedRoot + Path.AltDirectorySeparatorChar, PathComparison))
+        {
+            return false;
+        }
+
+        return !ContainsReparsePointBetween(normalizedRoot, normalizedPath);
     }
 
     public static string ToRepositoryRelative(string root, string path)
@@ -390,8 +405,44 @@ internal static class PathUtilities
         return relative == "." ? "." : relative.Replace(Path.DirectorySeparatorChar, '/');
     }
 
-    private static string EnsureTrailingSeparator(string path)
+    private static bool ContainsReparsePointBetween(string root, string path)
     {
-        return path.EndsWith(Path.DirectorySeparatorChar) ? path : path + Path.DirectorySeparatorChar;
+        var current = path;
+        while (!string.IsNullOrEmpty(current))
+        {
+            if (File.Exists(current) || Directory.Exists(current))
+            {
+                try
+                {
+                    if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        return true;
+                    }
+                }
+                catch (IOException)
+                {
+                    return true;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    return true;
+                }
+            }
+
+            if (string.Equals(current, root, PathComparison))
+            {
+                return false;
+            }
+
+            var parent = Directory.GetParent(current)?.FullName;
+            if (parent is null || string.Equals(parent, current, PathComparison))
+            {
+                return true;
+            }
+
+            current = parent;
+        }
+
+        return true;
     }
 }

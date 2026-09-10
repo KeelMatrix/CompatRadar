@@ -1,9 +1,15 @@
+using System.Reflection;
+
 namespace KeelMatrix.CompatRadar;
 
 internal static class RadarContract
 {
     public const int SchemaVersion = 1;
-    public const string ToolVersion = "0.1.0";
+    public static string ToolVersion => typeof(RadarContract).Assembly
+        .GetCustomAttributes<AssemblyMetadataAttribute>()
+        .FirstOrDefault(attribute => attribute.Key == "CompatRadar.ToolVersion")?.Value
+        ?? typeof(RadarContract).Assembly.GetName().Version?.ToString(3)
+        ?? "0.0.0";
     public const string ConfigurationFileName = "compat-radar.json";
     public const string DefaultReportFileName = "compat-radar-report.json";
     public const int OutputLimitBytes = 64 * 1024;
@@ -12,7 +18,8 @@ internal static class RadarContract
 internal enum WatchKind
 {
     NuGetPrerelease,
-    SdkPreview
+    SdkPreview,
+    RuntimePreview
 }
 
 internal enum ResultClassification

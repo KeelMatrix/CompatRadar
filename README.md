@@ -2,7 +2,7 @@
 
 Dependency bots tell you a new version exists. CompatRadar tells you whether a future version actually breaks your repository while today's stable state still passes—and gives you a reproducible failure before the upgrade becomes urgent.
 
-CompatRadar is a local-first .NET tool. It compares an explicitly selected NuGet prerelease or .NET SDK preview with the current stable control, repeats candidate failures, reports uncertainty honestly, and localizes a first bad candidate only when the evidence is monotonic.
+CompatRadar is a local-first .NET tool. It compares an explicitly selected NuGet prerelease or .NET SDK/runtime preview with the current stable control, repeats candidate failures, reports uncertainty honestly, and localizes a first bad candidate only when the evidence is monotonic.
 
 ## Install
 
@@ -51,9 +51,9 @@ compat-radar check --report compat-radar-report.json
 
 The command is explicit: CompatRadar does not infer every dependency worth watching. The watched package must already be referenced by the repository in a `PackageReference` or central `PackageVersion` declaration. The candidate override is applied only to an isolated temporary copy.
 
-## SDK preview check
+## SDK/runtime preview check
 
-Use the same schema with an SDK preview channel:
+Use the same schema with an installed SDK preview. The SDK supplies the runtime used by the validation command:
 
 ```json
 {
@@ -62,7 +62,7 @@ Use the same schema with an SDK preview channel:
   "watch": [
     {
       "kind": "sdk-preview",
-      "candidates": ["9.0.120", "10.0.400"]
+      "candidates": ["10.0.0-preview.1.12345.1"]
     }
   ],
   "validation": {
@@ -74,14 +74,14 @@ Use the same schema with an SDK preview channel:
 }
 ```
 
-For this channel, each candidate is applied to an isolated `global.json`. The requested SDK must be installed or otherwise available to the local .NET host; the tool does not download SDKs for you. This v1 adapter intentionally supports SDK previews only; runtime-only preview selection is unsupported.
+For this channel, each candidate is applied to an isolated `global.json`. The requested SDK must be installed or otherwise available to the local .NET host; the tool does not download SDKs for you. For a runtime-preview watch, use `"kind": "runtime-preview"`; it follows the same isolated `global.json` path and reports a missing preview as `UNSUPPORTED`, not as a future regression.
 
 ## Configuration
 
 Schema version `1` has these fields:
 
 - `control.sdk`: must be `current`; this is the stable control in the current execution environment.
-- `watch`: one or more explicit channels. Each channel has `kind`, `candidates`, and an optional `id`. NuGet channels also require `package` and may specify an HTTP(S) `feed` without embedded credentials. The supported SDK channel kind is `sdk-preview`; runtime-only preview configuration is rejected as unsupported.
+- `watch`: one or more explicit channels. Each channel has `kind`, `candidates`, and an optional `id`. NuGet channels also require `package` and may specify an HTTP(S) `feed` without embedded credentials. Preview channels support `sdk-preview` and `runtime-preview`.
 - `validation.command`: an executable plus arguments. Commands are started directly; shell syntax is not evaluated by CompatRadar.
 - `validation.workingDirectory`: a repository-relative directory.
 - `validation.timeoutSeconds`: bounded command timeout from 1 through 86400 seconds.
@@ -98,11 +98,11 @@ The report uses these stable states:
 | State | Meaning |
 |---|---|
 | `COMPATIBLE` | Stable and candidate both passed the configured confirmation policy. |
-| `FUTURE_REGRESSION` | Stable passed and every candidate confirmation failed. |
+| `FUTURE_REGRESSION` | Stable passed and repeated candidate failures reproduce the same normalized signature and fingerprint. |
 | `INCONCLUSIVE_BASELINE_FAILED` | Stable failed or was flaky, so the candidate was not treated as evidence. |
 | `INCONCLUSIVE_FLAKY` | Candidate confirmation attempts disagreed. |
 | `INCONCLUSIVE_EXECUTION` | Restore, launch, timeout, cancellation, or candidate materialization could not complete trustworthily. |
-| `UNSUPPORTED` | A future channel is outside the explicitly supported v1 adapter contract. |
+| `UNSUPPORTED` | The selected future channel cannot be exercised in the current environment, such as a missing SDK/runtime preview. |
 
 Exit codes are:
 
@@ -130,7 +130,7 @@ Use `--format json` for CI and `--report <path>` to write an artifact explicitly
 
 ## GitHub Action
 
-The repository includes a composite Action wrapper. Install the tool in the job, then call the local Action:
+The repository includes a composite Action wrapper. Install the tool in the job, then call the local Action. For a tagged release, consumers can use the immutable release tag:
 
 ```yaml
 - name: Install CompatRadar
@@ -138,13 +138,13 @@ The repository includes a composite Action wrapper. Install the tool in the job,
   run: dotnet tool install --global KeelMatrix.CompatRadar --version 0.1.0
 
 - name: Check future compatibility
-  uses: ./path/to/CompatRadar
+  uses: KeelMatrix/CompatRadar@v0.1.0
   with:
     config: compat-radar.json
     report: artifacts/compat-radar-report.json
 ```
 
-The wrapper invokes the same `compat-radar check` command, appends the report to `GITHUB_STEP_SUMMARY`, and emits a workflow error annotation for exit code `1`. No hosted dashboard is required. The repository CI workflow validates the supported Windows, Linux, and macOS operations and the packed-tool consumer path.
+The wrapper invokes the same `compat-radar check` command, appends the report to `GITHUB_STEP_SUMMARY`, and emits a workflow error annotation for exit code `1`. No hosted dashboard is required. The repository CI workflow validates the supported Windows, Linux, and macOS operations, the packed-tool consumer path, and the Action failure path.
 
 ## Security and privacy
 
@@ -154,9 +154,23 @@ Telemetry uses `KeelMatrix.Telemetry` only after the first trustworthy stable-ve
 
 ## Support and limitations
 
-The tool targets `net8.0` and supports Windows, Linux, and macOS operations. Public CI validates the supported Windows, Linux, and macOS operations; local validation additionally covers Windows. The v1 adapters are explicit NuGet prerelease package overrides and SDK preview selection through `global.json`; runtime-only preview selection is unsupported and rejected.
+The tool targets `net8.0` and supports Windows, Linux, and macOS operations. Public CI validates the supported Windows, Linux, and macOS operations. The v1 adapters are explicit NuGet prerelease package overrides and SDK/runtime preview selection through `global.json`; the relevant preview must already be installed.
 
 CompatRadar does not manage dependencies, open update pull requests, discover all dependencies, run hosted builds, provide accounts or scheduling, send notifications, support non-.NET ecosystems, generate patches, or guarantee that every future incompatibility will be predicted.
+
+## Troubleshooting
+
+- Configuration errors and invalid paths exit `2`; run `compat-radar config validate --format json` for machine-readable diagnostics.
+- Restore/feed failures are inconclusive. A configured candidate feed is added to the isolated copy's existing NuGet sources; it does not replace the repository's sources. Use environment-based credentials or a credential provider rather than URL credentials.
+- A missing SDK/runtime preview is `UNSUPPORTED`. Install the exact candidate and rerun; CompatRadar never downloads SDKs.
+- A failing stable control is `INCONCLUSIVE_BASELINE_FAILED`. Fix the repository first.
+- Different failure fingerprints across confirmation runs are `INCONCLUSIVE_FLAKY`; inspect the saved report and rerun with a stable test environment.
+- Timeout or process-launch errors are `INCONCLUSIVE_EXECUTION`; increase `timeoutSeconds` only when the command is expected to need it.
+- Reports contain sanitized diagnostics. If a report cannot be read, check that its path remains inside the repository.
+
+## Compatibility policy
+
+The durable configuration and report contracts are documented in [docs/compatibility.md](docs/compatibility.md). Security and privacy details are in [SECURITY.md](SECURITY.md) and [PRIVACY.md](PRIVACY.md).
 
 ## How this differs from dependency bots
 

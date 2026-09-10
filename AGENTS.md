@@ -15,7 +15,11 @@ dotnet restore KeelMatrix.CompatRadar.sln
 dotnet build KeelMatrix.CompatRadar.sln -c Release --no-restore
 dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build
 dotnet format KeelMatrix.CompatRadar.sln --verify-no-changes
-dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build
+pwsh -NoProfile -File scripts/security-audit.ps1
+dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build --include-symbols --p:SymbolPackageFormat=snupkg --output artifacts/packages
+pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.0
+pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
+pwsh -NoProfile -File scripts/technical-validation-gate.ps1
 ```
 
 Run the tool from source:
@@ -35,7 +39,7 @@ dotnet run --project src/KeelMatrix.CompatRadar -- check --format json
 - Reparse points and symbolic links are not followed while materializing a repository.
 - Reports use repository-relative paths and sanitized bounded diagnostics.
 - Telemetry is best-effort and runs only after a trustworthy completed comparison; `KEELMATRIX_NO_TELEMETRY=1` suppresses it.
-- No GitHub Actions workflow files are included in this phase. The checked-in Action is a local wrapper around an installed `compat-radar` command.
+- `.github/workflows/ci.yml` validates the Windows, Linux, and macOS matrix; `release.yml` is tag-gated and inert until an approved release action.
 
 ## Validation strategy
 

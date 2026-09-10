@@ -332,6 +332,12 @@ internal static class RadarApplication
 
         if (positionals.SequenceEqual(["config", "validate"]))
         {
+            if (report is not null)
+            {
+                error = "'config validate' cannot be combined with --report.";
+                return false;
+            }
+
             options = new CliOptions("config validate", null, config, report, format, false);
             return true;
         }
@@ -348,7 +354,7 @@ internal static class RadarApplication
 
     private static bool TryReadValue(string[] args, ref int index, out string value, out string? error)
     {
-        if (index + 1 >= args.Length || string.IsNullOrWhiteSpace(args[++index]))
+        if (index + 1 >= args.Length || string.IsNullOrWhiteSpace(args[++index]) || args[index].StartsWith('-'))
         {
             value = string.Empty;
             error = $"Option '{args[index - 1]}' requires a value.";
@@ -363,7 +369,7 @@ internal static class RadarApplication
     public static string Usage() => """
 Usage:
   compat-radar check [--config <path>] [--format text|json] [--report <path>]
-  compat-radar config validate [--config <path>]
+  compat-radar config validate [--config <path>] [--format text|json]
   compat-radar reproduce <finding-id> [--report <path>] [--format text|json]
 
 The tool runs configured repository validation commands in isolated temporary copies.
