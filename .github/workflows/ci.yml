@@ -344,7 +344,7 @@ jobs:
           </Project>
           '@ | Set-Content action-fixture/Fixture.csproj
           @'
-          if (Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE") == "1") { Console.Error.WriteLine("planted action failure"); Environment.Exit(19); }
+          if (Environment.GetEnvironmentVariable("COMPATRADAR_FORCE_ACTION_FAILURE") == "1") { Console.Error.WriteLine("planted action failure"); Environment.Exit(19); }
           '@ | Set-Content action-fixture/Program.cs
           @'
           { "version": 1, "control": { "sdk": "current" }, "watch": [{ "kind": "sdk-preview", "candidates": ["8.0.424"] }], "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": "action-fixture", "timeoutSeconds": 120 }, "policy": { "confirmationRuns": 1 } }
@@ -360,6 +360,8 @@ jobs:
         id: regression
         continue-on-error: true
         uses: ./
+        env:
+          COMPATRADAR_FORCE_ACTION_FAILURE: '1'
         with:
           config: action-fixture/compat-radar.json
           report: action-fixture/failure.json
