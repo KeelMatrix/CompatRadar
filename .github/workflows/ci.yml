@@ -313,6 +313,8 @@ jobs:
     needs: package
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      GITHUB_STEP_SUMMARY: ${{ runner.temp }}/compatradar-action-summary.md
     steps:
       - name: Check out source
         uses: actions/checkout@v7
