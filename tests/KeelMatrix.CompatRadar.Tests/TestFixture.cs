@@ -11,7 +11,7 @@ internal static class TestFixture
         var root = Path.Combine(Path.GetTempPath(), "compat-radar-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         var feed = Path.Combine(root, "feed");
-        foreach (var version in new[] { "1.0.0", "1.1.0", "2.0.0" }) CreatePackage(feed, version);
+        foreach (var version in new[] { "1.0.0", "1.1.0", "2.0.0" }) CreatePackage(feed, "CompatRadar.TestDependency", version);
         File.WriteAllText(Path.Combine(root, "NuGet.Config"), $"""
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
@@ -87,16 +87,16 @@ if (behavior == "stable-fail" && !candidate) Environment.Exit(11);
 """);
     }
 
-    private static void CreatePackage(string feed, string version)
+    public static void CreatePackage(string feed, string packageId, string version)
     {
         Directory.CreateDirectory(feed);
-        var packagePath = Path.Combine(feed, $"CompatRadar.TestDependency.{version}.nupkg");
+        var packagePath = Path.Combine(feed, $"{packageId}.{version}.nupkg");
         using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
-        AddEntry(archive, "CompatRadar.TestDependency.nuspec", $"""
+        AddEntry(archive, $"{packageId}.nuspec", $"""
 <?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
   <metadata>
-    <id>CompatRadar.TestDependency</id>
+    <id>{packageId}</id>
     <version>{version}</version>
     <authors>CompatRadar Tests</authors>
     <description>Deterministic synthetic dependency used by tests.</description>
