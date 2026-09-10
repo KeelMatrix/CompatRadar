@@ -10,6 +10,7 @@ artifacts/
 *.user
 *.suo
 compat-radar-report.json
+!tests/fixtures/v1/compat-radar-report.json
 .compat-radar/
 _probe/
 secrets/
