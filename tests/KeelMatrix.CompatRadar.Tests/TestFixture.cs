@@ -127,7 +127,28 @@ if (behavior == "stable-fail" && !candidate) Environment.Exit(11);
 
     public static void DeleteRepository(string root)
     {
-        try { Directory.Delete(root, recursive: true); } catch { }
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            try
+            {
+                if (!Directory.Exists(root)) return;
+                Directory.Delete(root, recursive: true);
+                if (!Directory.Exists(root)) return;
+            }
+            catch (IOException) when (attempt < 49)
+            {
+            }
+            catch (UnauthorizedAccessException) when (attempt < 49)
+            {
+            }
+
+            Thread.Sleep(100);
+        }
+
+        if (Directory.Exists(root))
+        {
+            throw new IOException($"Fixture repository cleanup did not complete: {root}");
+        }
     }
 }
 
