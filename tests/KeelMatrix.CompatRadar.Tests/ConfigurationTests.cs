@@ -256,7 +256,9 @@ public sealed class ConfigurationTests
                 "<ItemGroup><PackageReference Include=\"Newtonsoft.Json\" Version=\"13.0.3\" /></ItemGroup></Project>",
                 StringComparison.Ordinal));
 
-            var result = MaterializationScope.AddCandidateFeed(copy, "https://api.nuget.org/v3/index.json", "Newtonsoft.Json");
+            var candidateFeed = Path.Combine(copy, "candidate-feed");
+            TestFixture.CreatePackage(candidateFeed, "Newtonsoft.Json", "13.0.3");
+            var result = MaterializationScope.AddCandidateFeed(copy, candidateFeed, "Newtonsoft.Json");
             Assert.True(result.Applied);
             Assert.Contains("key=\"fixture\"", File.ReadAllText(configPath), StringComparison.Ordinal);
 
