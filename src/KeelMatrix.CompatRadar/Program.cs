@@ -354,10 +354,19 @@ internal static class RadarApplication
 
     private static bool TryReadValue(string[] args, ref int index, out string value, out string? error)
     {
-        if (index + 1 >= args.Length || string.IsNullOrWhiteSpace(args[++index]) || args[index].StartsWith('-'))
+        var option = args[index];
+        if (index + 1 >= args.Length)
         {
             value = string.Empty;
-            error = $"Option '{args[index - 1]}' requires a value.";
+            error = $"Option '{option}' requires a value.";
+            return false;
+        }
+
+        index++;
+        if (string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith('-'))
+        {
+            value = string.Empty;
+            error = $"Option '{option}' requires a value.";
             return false;
         }
 

@@ -168,6 +168,76 @@ jobs:
           path: artifacts/test-results
           if-no-files-found: error
 
+  technical-validation:
+    name: Technical validation gate
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      COMPATRADAR_PREVIEW_CANDIDATE: 11.0.100-preview.7.26381.103
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Check out pinned real-repository corpus
+        uses: actions/checkout@v7
+        with:
+          repository: KeelMatrix/Redaction
+          ref: 47c74880ff7f50e554cb9f06d84507f4a78a7818
+          path: gate-corpus/KeelMatrix.Redaction
+
+      - name: Check out pinned real-repository corpus
+        uses: actions/checkout@v7
+        with:
+          repository: KeelMatrix/Telemetry
+          ref: 225eca7002386cba951654da3dc963c14b0ba18e
+          path: gate-corpus/KeelMatrix.Telemetry
+
+      - name: Check out pinned real-repository corpus
+        uses: actions/checkout@v7
+        with:
+          repository: KeelMatrix/QueryWatch
+          ref: 3d93c9cc3e86d77e14880058a9df846040af282f
+          path: gate-corpus/KeelMatrix.QueryWatch
+
+      - name: Set up stable .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.424
+
+      - name: Set up pinned preview .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.COMPATRADAR_PREVIEW_CANDIDATE }}
+
+      - name: Run exact technical-validation gate
+        shell: pwsh
+        run: |
+          $paths = @(
+            'gate-corpus/KeelMatrix.Redaction/app',
+            'gate-corpus/KeelMatrix.Telemetry/app',
+            'gate-corpus/KeelMatrix.QueryWatch/app'
+          )
+          pwsh -NoProfile -File scripts/technical-validation-gate.ps1 `
+            -OutputPath artifacts/technical-validation-gate.md `
+            -PreviewCandidate $env:COMPATRADAR_PREVIEW_CANDIDATE `
+            -RealRepositoryPath $paths
+          if ($LASTEXITCODE -ne 0) { throw "Technical validation gate did not pass (exit $LASTEXITCODE)." }
+
+      - name: Publish technical-validation evidence in job summary
+        shell: pwsh
+        run: Get-Content -LiteralPath artifacts/technical-validation-gate.md -Raw | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload technical-validation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: technical-validation-gate
+          if-no-files-found: warn
+          path: |
+            artifacts/technical-validation-gate.md
+            artifacts/technical-validation-gate.json
+
   package:
     name: Package / inspect
     needs: validate

@@ -9,20 +9,129 @@ public sealed class ReportAndCliTests
     {
         var output = new StringWriter();
         var error = new StringWriter();
+        var usage = RadarApplication.Usage();
         Assert.Equal(0, await RadarApplication.RunAsync([], Directory.GetCurrentDirectory(), new RecordingTelemetry(), output, error));
-        Assert.Contains("compat-radar check", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("compat-radar check [--config <path>] [--format text|json] [--report <path>]", usage, StringComparison.Ordinal);
+        Assert.Contains("compat-radar config validate [--config <path>] [--format text|json]", usage, StringComparison.Ordinal);
+        Assert.Contains("compat-radar reproduce <finding-id> [--report <path>] [--format text|json]", usage, StringComparison.Ordinal);
+        Assert.Contains(usage, output.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, error.ToString());
 
         output.GetStringBuilder().Clear();
         error.GetStringBuilder().Clear();
         Assert.Equal(2, await RadarApplication.RunAsync(["unknown"], Directory.GetCurrentDirectory(), new RecordingTelemetry(), output, error));
         Assert.Contains("Expected", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains(usage, error.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, output.ToString());
 
         output.GetStringBuilder().Clear();
         error.GetStringBuilder().Clear();
         Assert.Equal(2, await RadarApplication.RunAsync(["check", "--format"], Directory.GetCurrentDirectory(), new RecordingTelemetry(), output, error));
         Assert.Contains("requires a value", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains(usage, error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, output.ToString());
+
+        foreach (var invalidArguments in new[]
+        {
+            new[] { "check", "--unknown" },
+            new[] { "check", "--format", "yaml" },
+            new[] { "check", "--config" },
+            new[] { "check", "--report" }
+        })
+        {
+            output.GetStringBuilder().Clear();
+            error.GetStringBuilder().Clear();
+
+            Assert.Equal(2, await RadarApplication.RunAsync(invalidArguments, Directory.GetCurrentDirectory(), new RecordingTelemetry(), output, error));
+            Assert.Contains(usage, error.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, output.ToString());
+        }
+
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+        Assert.Equal(2, await RadarApplication.RunAsync(["check", "--unknown"], Directory.GetCurrentDirectory(), new RecordingTelemetry(), output, error));
+        Assert.Contains("Unknown option '--unknown'.", error.ToString(), StringComparison.Ordinal);
+
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+        Assert.Equal(2, await RadarApplication.RunAsync(["check", "--format", "yaml"], Directory.GetCurrentDirectory(), new RecordingTelemetry(), output, error));
+        Assert.Contains("--format must be 'text' or 'json'.", error.ToString(), StringComparison.Ordinal);
+
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+        Assert.Equal(2, await RadarApplication.RunAsync(["check", "--config"], Directory.GetCurrentDirectory(), new RecordingTelemetry(), output, error));
+        Assert.Contains("Option '--config' requires a value.", error.ToString(), StringComparison.Ordinal);
+
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+        Assert.Equal(2, await RadarApplication.RunAsync(["check", "--report"], Directory.GetCurrentDirectory(), new RecordingTelemetry(), output, error));
+        Assert.Contains("Option '--report' requires a value.", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReproduceRequiresAnExistingFindingId()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "pass", "\"1.0.0\"", confirmationRuns: 1);
+            var missingOutput = new StringWriter();
+            var missingError = new StringWriter();
+            Assert.Equal(2, await RadarApplication.RunAsync(["reproduce"], root, new RecordingTelemetry(), missingOutput, missingError));
+            Assert.Contains("Expected 'check', 'config validate', or 'reproduce <finding-id>'.", missingError.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, missingOutput.ToString());
+
+            var reportOutput = new StringWriter();
+            var reportError = new StringWriter();
+            Assert.Equal(0, await RadarApplication.RunAsync(["check", "--report", "report.json"], root, new RecordingTelemetry(), reportOutput, reportError));
+            Assert.Equal(string.Empty, reportError.ToString());
+
+            var unknownOutput = new StringWriter();
+            var unknownError = new StringWriter();
+            Assert.Equal(2, await RadarApplication.RunAsync(
+                ["reproduce", "missing-finding", "--report", "report.json"],
+                root,
+                new RecordingTelemetry(),
+                unknownOutput,
+                unknownError));
+            Assert.Contains("finding 'missing-finding' was not present in the report", unknownError.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, unknownOutput.ToString());
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
+    public async Task SuccessfulCommandsWriteOnlyToStandardOutput()
+    {
+        var root = TestFixture.CreateRepository("monotonic");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "monotonic", "\"1.1.0\"", confirmationRuns: 1);
+
+            var validateOutput = new StringWriter();
+            var validateError = new StringWriter();
+            Assert.Equal(0, await RadarApplication.RunAsync(["config", "validate"], root, new RecordingTelemetry(), validateOutput, validateError));
+            Assert.Contains("Configuration is valid", validateOutput.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, validateError.ToString());
+
+            var checkOutput = new StringWriter();
+            var checkError = new StringWriter();
+            Assert.Equal(1, await RadarApplication.RunAsync(["check", "--report", "report.json"], root, new RecordingTelemetry(), checkOutput, checkError));
+            Assert.Contains("Future compatibility regressions detected.", checkOutput.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, checkError.ToString());
+
+            var reproduceOutput = new StringWriter();
+            var reproduceError = new StringWriter();
+            Assert.Equal(0, await RadarApplication.RunAsync(
+                ["reproduce", "package-watch-1.1.0", "--report", "report.json"],
+                root,
+                new RecordingTelemetry(),
+                reproduceOutput,
+                reproduceError));
+            Assert.Contains("Reproduction for package-watch-1.1.0", reproduceOutput.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, reproduceError.ToString());
+        }
+        finally { TestFixture.DeleteRepository(root); }
     }
 
     [Fact]
