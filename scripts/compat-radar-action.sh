@@ -6,7 +6,7 @@ report="${2:-compat-radar-report.json}"
 compat-radar check --config "$config" --format text --report "$report"
 status=$?
 
-summary_path="${GITHUB_STEP_SUMMARY:-${COMPATRADAR_ACTION_SUMMARY:-${RUNNER_TEMP:-}/compatradar-action-summary.md}}"
+summary_path="${COMPATRADAR_ACTION_SUMMARY:-${GITHUB_STEP_SUMMARY:-${RUNNER_TEMP:-}/compatradar-action-summary.md}}"
 if [[ -n "$summary_path" && -f "$report" ]]; then
   mkdir -p "$(dirname "$summary_path")"
   {
