@@ -73,13 +73,8 @@ public sealed class CrossPlatformTests
     }
 
     [Fact]
-    public void CaseDifferentSiblingIsNotInsideRepositoryOnCaseSensitiveSystems()
+    public void CaseDifferentSiblingFollowsTheActualFilesystemContainmentBoundary()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         var parent = Path.Combine(Path.GetTempPath(), "compat-radar-case", Guid.NewGuid().ToString("N"));
         var root = Path.Combine(parent, "Repository");
         var sibling = Path.Combine(parent, "repository");
@@ -88,8 +83,17 @@ public sealed class CrossPlatformTests
             Directory.CreateDirectory(root);
             Directory.CreateDirectory(sibling);
 
-            Assert.False(PathUtilities.IsWithinRoot(root, sibling));
-            Assert.False(PathUtilities.IsWithinRoot(root, Path.Combine(sibling, "compat-radar.json")));
+            var distinctDirectories = Directory.EnumerateDirectories(parent).Count() == 2;
+            if (distinctDirectories)
+            {
+                Assert.False(PathUtilities.IsWithinRoot(root, sibling));
+                Assert.False(PathUtilities.IsWithinRoot(root, Path.Combine(sibling, "compat-radar.json")));
+            }
+            else
+            {
+                Assert.True(PathUtilities.IsWithinRoot(root, sibling));
+                Assert.True(PathUtilities.IsWithinRoot(root, Path.Combine(sibling, "compat-radar.json")));
+            }
         }
         finally { TestFixture.DeleteRepository(parent); }
     }

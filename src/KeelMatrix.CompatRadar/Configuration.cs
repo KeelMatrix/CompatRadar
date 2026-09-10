@@ -376,10 +376,6 @@ internal static class ConfigurationLoader
 
 internal static class PathUtilities
 {
-    private static StringComparison PathComparison => OperatingSystem.IsWindows()
-        ? StringComparison.OrdinalIgnoreCase
-        : StringComparison.Ordinal;
-
     public static string ResolveUnderRoot(string root, string path)
     {
         return Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(root, path));
@@ -389,14 +385,15 @@ internal static class PathUtilities
     {
         var normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var normalizedPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (!string.Equals(normalizedPath, normalizedRoot, PathComparison)
-            && !normalizedPath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, PathComparison)
-            && !normalizedPath.StartsWith(normalizedRoot + Path.AltDirectorySeparatorChar, PathComparison))
+        var comparison = GetPathComparison(normalizedRoot);
+        if (!string.Equals(normalizedPath, normalizedRoot, comparison)
+            && !normalizedPath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, comparison)
+            && !normalizedPath.StartsWith(normalizedRoot + Path.AltDirectorySeparatorChar, comparison))
         {
             return false;
         }
 
-        return !ContainsReparsePointBetween(normalizedRoot, normalizedPath);
+        return !ContainsReparsePointBetween(normalizedRoot, normalizedPath, comparison);
     }
 
     public static string ToRepositoryRelative(string root, string path)
@@ -405,7 +402,7 @@ internal static class PathUtilities
         return relative == "." ? "." : relative.Replace(Path.DirectorySeparatorChar, '/');
     }
 
-    private static bool ContainsReparsePointBetween(string root, string path)
+    private static bool ContainsReparsePointBetween(string root, string path, StringComparison comparison)
     {
         var current = path;
         while (!string.IsNullOrEmpty(current))
@@ -429,13 +426,13 @@ internal static class PathUtilities
                 }
             }
 
-            if (string.Equals(current, root, PathComparison))
+            if (string.Equals(current, root, comparison))
             {
                 return false;
             }
 
             var parent = Directory.GetParent(current)?.FullName;
-            if (parent is null || string.Equals(parent, current, PathComparison))
+            if (parent is null || string.Equals(parent, current, comparison))
             {
                 return true;
             }
@@ -444,5 +441,62 @@ internal static class PathUtilities
         }
 
         return true;
+    }
+
+    private static StringComparison GetPathComparison(string root)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return StringComparison.OrdinalIgnoreCase;
+        }
+
+        // macOS can use either a case-sensitive or case-insensitive volume. Probe
+        // the existing root's parent without creating or modifying any filesystem
+        // entry, and use ordinal comparison whenever both spellings are distinct.
+        var parent = Directory.GetParent(root);
+        var leaf = Path.GetFileName(root);
+        if (parent is not null && !string.IsNullOrEmpty(leaf))
+        {
+            var alternateLeaf = ToggleCase(leaf);
+            if (!string.Equals(leaf, alternateLeaf, StringComparison.Ordinal))
+            {
+                try
+                {
+                    var matches = Directory.EnumerateFileSystemEntries(parent.FullName)
+                        .Where(entry => string.Equals(Path.GetFileName(entry), leaf, StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+                    var alternatePath = Path.Combine(parent.FullName, alternateLeaf);
+                    var alternateExists = Directory.Exists(alternatePath) || File.Exists(alternatePath);
+                    if (alternateExists && matches.Length == 1)
+                    {
+                        return StringComparison.OrdinalIgnoreCase;
+                    }
+
+                    if (matches.Length >= 2)
+                    {
+                        return StringComparison.Ordinal;
+                    }
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        return StringComparison.Ordinal;
+    }
+
+    private static string ToggleCase(string value)
+    {
+        var characters = value.ToCharArray();
+        for (var index = 0; index < characters.Length; index++)
+        {
+            if (!char.IsLetter(characters[index])) continue;
+            characters[index] = char.IsUpper(characters[index])
+                ? char.ToLowerInvariant(characters[index])
+                : char.ToUpperInvariant(characters[index]);
+            break;
+        }
+
+        return new string(characters);
     }
 }

@@ -164,7 +164,7 @@ internal sealed class MaterializationScope : IDisposable
         }
     }
 
-    public static FeedConfigurationResult AddCandidateFeed(string repository, string feed)
+    public static FeedConfigurationResult AddCandidateFeed(string repository, string feed, string? watchedPackage = null)
     {
         try
         {
@@ -207,6 +207,34 @@ internal sealed class MaterializationScope : IDisposable
             else
             {
                 existing.SetAttributeValue("value", feed);
+            }
+
+            // Preserve all repository sources and mappings while adding only the
+            // watched package to the isolated candidate source.
+            if (!string.IsNullOrWhiteSpace(watchedPackage))
+            {
+                var packageSourceMapping = configuration.Element("packageSourceMapping");
+                if (packageSourceMapping is not null)
+                {
+                    var candidateMapping = packageSourceMapping.Elements("packageSource")
+                        .FirstOrDefault(element => string.Equals(
+                            (string?)element.Attribute("key"),
+                            "compat-radar-candidate",
+                            StringComparison.OrdinalIgnoreCase));
+                    if (candidateMapping is null)
+                    {
+                        candidateMapping = new XElement(
+                            "packageSource",
+                            new XAttribute("key", "compat-radar-candidate"));
+                        packageSourceMapping.Add(candidateMapping);
+                    }
+
+                    if (!candidateMapping.Elements("package")
+                        .Any(element => string.Equals((string?)element.Attribute("pattern"), watchedPackage, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        candidateMapping.Add(new XElement("package", new XAttribute("pattern", watchedPackage)));
+                    }
+                }
             }
 
             document.Save(configPath, SaveOptions.DisableFormatting);

@@ -165,6 +165,7 @@ internal sealed class RadarEngine
             configuration,
             candidate: null,
             feed: null,
+            package: null,
             cancellationToken).ConfigureAwait(false);
 
         CandidateOverrideResult overrideResult = watch.Kind == WatchKind.NuGetPrerelease
@@ -193,6 +194,7 @@ internal sealed class RadarEngine
                 configuration,
                 candidate,
                 watch.Feed,
+                watch.Package,
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -224,6 +226,7 @@ internal sealed class RadarEngine
         RadarConfiguration configuration,
         string? candidate,
         string? feed,
+        string? package,
         CancellationToken cancellationToken)
     {
         var command = PrepareValidationCommand(validationCommand);
@@ -234,7 +237,7 @@ internal sealed class RadarEngine
         {
             if (!string.IsNullOrWhiteSpace(feed))
             {
-                var feedResult = MaterializationScope.AddCandidateFeed(materializedRoot, feed);
+                var feedResult = MaterializationScope.AddCandidateFeed(materializedRoot, feed, package);
                 if (!feedResult.Applied)
                 {
                     return CreateExecutionFailureEvidence(
