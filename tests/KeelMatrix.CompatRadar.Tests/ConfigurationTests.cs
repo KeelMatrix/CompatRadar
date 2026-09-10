@@ -212,13 +212,67 @@ public sealed class ConfigurationTests
         try
         {
             MaterializationScope.CopyRepository(root, copy);
-            var result = MaterializationScope.AddCandidateFeed(copy, "https://feed.example/v3/index.json");
+            var configPath = Path.Combine(copy, "NuGet.Config");
+            var configText = File.ReadAllText(configPath).Replace(
+                "</configuration>",
+                "<packageSourceMapping><clear /><packageSource key=\"fixture\"><package pattern=\"Other.*\" /></packageSource></packageSourceMapping></configuration>",
+                StringComparison.Ordinal);
+            File.WriteAllText(configPath, configText);
+            var result = MaterializationScope.AddCandidateFeed(copy, "https://feed.example/v3/index.json", "CompatRadar.TestDependency");
             var config = File.ReadAllText(Path.Combine(copy, "NuGet.Config"));
 
             Assert.True(result.Applied);
             Assert.Contains("key=\"fixture\"", config, StringComparison.Ordinal);
             Assert.Contains("key=\"compat-radar-candidate\"", config, StringComparison.Ordinal);
+            Assert.Contains("pattern=\"CompatRadar.TestDependency\"", config, StringComparison.Ordinal);
+            Assert.Contains("pattern=\"Other.*\"", config, StringComparison.Ordinal);
             Assert.DoesNotContain("--source", config, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(root);
+            TestFixture.DeleteRepository(copy);
+        }
+    }
+
+    [Fact]
+    public async Task CandidateFeedRestoresWatchedPackageWhileNormalSourceRemainsAvailable()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        var copy = Path.Combine(Path.GetTempPath(), "compat-radar-feed-integration", Guid.NewGuid().ToString("N"));
+        var packages = Path.Combine(copy, ".packages");
+        try
+        {
+            MaterializationScope.CopyRepository(root, copy);
+            var configPath = Path.Combine(copy, "NuGet.Config");
+            var configText = File.ReadAllText(configPath).Replace(
+                "</configuration>",
+                "<packageSourceMapping><clear /><packageSource key=\"fixture\"><package pattern=\"CompatRadar.TestDependency\" /></packageSource></packageSourceMapping></configuration>",
+                StringComparison.Ordinal);
+            File.WriteAllText(configPath, configText);
+            var projectPath = Path.Combine(copy, "Fixture.csproj");
+            File.WriteAllText(projectPath, File.ReadAllText(projectPath).Replace(
+                "</Project>",
+                "<ItemGroup><PackageReference Include=\"Newtonsoft.Json\" Version=\"13.0.3\" /></ItemGroup></Project>",
+                StringComparison.Ordinal));
+
+            var result = MaterializationScope.AddCandidateFeed(copy, "https://api.nuget.org/v3/index.json", "Newtonsoft.Json");
+            Assert.True(result.Applied);
+            Assert.Contains("key=\"fixture\"", File.ReadAllText(configPath), StringComparison.Ordinal);
+
+            var restore = await ProcessRunner.RunAsync(
+                new ParsedCommand("dotnet", ["restore", "Fixture.csproj", "--configfile", "NuGet.Config", "--packages", packages, "--no-cache", "--nologo"]),
+                copy,
+                new Dictionary<string, string>
+                {
+                    ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
+                    ["KEELMATRIX_NO_TELEMETRY"] = "1"
+                },
+                TimeSpan.FromSeconds(120));
+
+            Assert.True(restore.ExitCode == 0, restore.NormalizedSignature);
+            Assert.True(File.Exists(Path.Combine(packages, "newtonsoft.json", "13.0.3", "newtonsoft.json.13.0.3.nupkg")));
+            Assert.True(Directory.Exists(Path.Combine(packages, "compatradar.testdependency", "1.0.0")));
         }
         finally
         {

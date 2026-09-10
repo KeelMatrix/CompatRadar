@@ -7,7 +7,19 @@ param(
 $ErrorActionPreference = 'Stop'
 $telemetryWasSet = Test-Path Env:KEELMATRIX_NO_TELEMETRY
 $telemetryValue = $env:KEELMATRIX_NO_TELEMETRY
+$dotnetTelemetryWasSet = Test-Path Env:DOTNET_CLI_TELEMETRY_OPTOUT
+$dotnetTelemetryValue = $env:DOTNET_CLI_TELEMETRY_OPTOUT
+$noLogoWasSet = Test-Path Env:DOTNET_NOLOGO
+$noLogoValue = $env:DOTNET_NOLOGO
+$firstRunWasSet = Test-Path Env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE
+$firstRunValue = $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE
+$certificateWasSet = Test-Path Env:DOTNET_GENERATE_ASPNET_CERTIFICATE
+$certificateValue = $env:DOTNET_GENERATE_ASPNET_CERTIFICATE
 $env:KEELMATRIX_NO_TELEMETRY = '1'
+$env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+$env:DOTNET_NOLOGO = '1'
+$env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
+$env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
 $package = (Resolve-Path -LiteralPath $PackagePath).Path
 $packageName = [IO.Path]::GetFileNameWithoutExtension($package)
 if ($packageName -notmatch '^KeelMatrix\.CompatRadar\.(?<version>[^.]+(?:\.[^.]+){2,3})$') { throw "Unexpected CompatRadar package name '$packageName'." }
@@ -204,4 +216,8 @@ finally {
     if ((Get-Location).Path -eq $fixture) { Pop-Location }
     if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
     if ($telemetryWasSet) { $env:KEELMATRIX_NO_TELEMETRY = $telemetryValue } else { Remove-Item Env:KEELMATRIX_NO_TELEMETRY -ErrorAction SilentlyContinue }
+    if ($dotnetTelemetryWasSet) { $env:DOTNET_CLI_TELEMETRY_OPTOUT = $dotnetTelemetryValue } else { Remove-Item Env:DOTNET_CLI_TELEMETRY_OPTOUT -ErrorAction SilentlyContinue }
+    if ($noLogoWasSet) { $env:DOTNET_NOLOGO = $noLogoValue } else { Remove-Item Env:DOTNET_NOLOGO -ErrorAction SilentlyContinue }
+    if ($firstRunWasSet) { $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = $firstRunValue } else { Remove-Item Env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE -ErrorAction SilentlyContinue }
+    if ($certificateWasSet) { $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = $certificateValue } else { Remove-Item Env:DOTNET_GENERATE_ASPNET_CERTIFICATE -ErrorAction SilentlyContinue }
 }

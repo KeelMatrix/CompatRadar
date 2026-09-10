@@ -62,7 +62,7 @@ Use the same schema with an installed SDK preview. The SDK supplies the runtime 
   "watch": [
     {
       "kind": "sdk-preview",
-      "candidates": ["10.0.0-preview.1.12345.1"]
+      "candidates": ["11.0.100-rc.1.26425.128"]
     }
   ],
   "validation": {
@@ -74,7 +74,7 @@ Use the same schema with an installed SDK preview. The SDK supplies the runtime 
 }
 ```
 
-For this channel, each candidate is applied to an isolated `global.json`. The requested SDK must be installed or otherwise available to the local .NET host; the tool does not download SDKs for you. For a runtime-preview watch, use `"kind": "runtime-preview"`; it follows the same isolated `global.json` path and reports a missing preview as `UNSUPPORTED`, not as a future regression.
+For this channel, each candidate is applied to an isolated `global.json`. The example uses the .NET 11 release-candidate SDK version currently listed by Microsoft; use the exact candidate installed in your environment. The requested SDK must be installed or otherwise available to the local .NET host; the tool does not download SDKs for you. For a runtime-preview watch, use `"kind": "runtime-preview"`; it follows the same isolated `global.json` path and reports a missing preview as `UNSUPPORTED`, not as a future regression.
 
 ## Configuration
 
