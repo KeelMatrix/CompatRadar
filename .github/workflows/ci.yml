@@ -218,10 +218,12 @@ jobs:
             'gate-corpus/KeelMatrix.Telemetry/app',
             'gate-corpus/KeelMatrix.QueryWatch/app'
           )
-          pwsh -NoProfile -File scripts/technical-validation-gate.ps1 `
-            -OutputPath artifacts/technical-validation-gate.md `
-            -PreviewCandidate $env:COMPATRADAR_PREVIEW_CANDIDATE `
-            -RealRepositoryPath $paths
+          $gateParameters = @{
+            OutputPath = 'artifacts/technical-validation-gate.md'
+            PreviewCandidate = $env:COMPATRADAR_PREVIEW_CANDIDATE
+            RealRepositoryPath = $paths
+          }
+          & ./scripts/technical-validation-gate.ps1 @gateParameters
           if ($LASTEXITCODE -ne 0) { throw "Technical validation gate did not pass (exit $LASTEXITCODE)." }
 
       - name: Publish technical-validation evidence in job summary
