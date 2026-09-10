@@ -27,6 +27,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up pinned .NET SDK
         uses: actions/setup-dotnet@v6
@@ -178,6 +180,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Check out pinned real-repository corpus
         uses: actions/checkout@v7
@@ -214,9 +218,9 @@ jobs:
         shell: pwsh
         run: |
           $paths = @(
-            'gate-corpus/KeelMatrix.Redaction/app',
-            'gate-corpus/KeelMatrix.Telemetry/app',
-            'gate-corpus/KeelMatrix.QueryWatch/app'
+            'gate-corpus/KeelMatrix.Redaction',
+            'gate-corpus/KeelMatrix.Telemetry',
+            'gate-corpus/KeelMatrix.QueryWatch'
           )
           $gateParameters = @{
             OutputPath = 'artifacts/technical-validation-gate.md'
@@ -248,6 +252,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up pinned .NET SDK
         uses: actions/setup-dotnet@v6
@@ -309,7 +315,7 @@ jobs:
 
       - name: Complete package contract inspection
         shell: pwsh
-        run: pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.0 -ExpectedCommit $env:GITHUB_SHA
+        run: pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.0 -ExpectedCommit '${{ github.event.pull_request.head.sha || github.sha }}'
 
       - name: Upload packed tool for cross-platform consumer smoke
         uses: actions/upload-artifact@v7
@@ -333,6 +339,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up pinned .NET SDK
         uses: actions/setup-dotnet@v6
@@ -388,6 +396,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up pinned .NET SDK
         uses: actions/setup-dotnet@v6
