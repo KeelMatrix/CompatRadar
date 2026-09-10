@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  KEELMATRIX_NO_TELEMETRY: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  publish:
+    name: Validate, inspect, and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Derive and validate one release version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" != tag || ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'Release workflow accepts only vX.Y.Z tags.' >&2
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          echo "release_version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pinned .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.424
+
+      - name: Verify telemetry suppression
+        shell: pwsh
+        run: if ($env:KEELMATRIX_NO_TELEMETRY -ne '1') { throw 'Telemetry must be disabled for release validation.' }
+
+      - name: Restore with controlled sources and one version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
+        run: dotnet restore KeelMatrix.CompatRadar.sln --configfile NuGet.config -p:CompatRadarReleaseVersion=$env:RELEASE_VERSION -p:RepositoryCommit=$env:GITHUB_SHA
+
+      - name: Build and test before pack
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
+        run: |
+          dotnet build KeelMatrix.CompatRadar.sln -c Release --no-restore -warnaserror -p:CompatRadarReleaseVersion=$env:RELEASE_VERSION -p:RepositoryCommit=$env:GITHUB_SHA
+          dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore
+          dotnet format KeelMatrix.CompatRadar.sln --verify-no-changes --no-restore
+
+      - name: Pack exact release artifacts
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
+        run: dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build --no-restore --include-symbols --p:SymbolPackageFormat=snupkg --p:CompatRadarReleaseVersion=$env:RELEASE_VERSION --p:RepositoryCommit=$env:GITHUB_SHA --output artifacts/packages
+
+      - name: Inspect exact package contract
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
+        run: pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion $env:RELEASE_VERSION -ExpectedCommit $env:GITHUB_SHA
+
+      - name: Authenticate to NuGet.org
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: dmitriyzen
+
+      - name: Publish only validated artifacts
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          $nupkg = Join-Path $PWD "artifacts/packages/KeelMatrix.CompatRadar.$env:RELEASE_VERSION.nupkg"
+          $snupkg = Join-Path $PWD "artifacts/packages/KeelMatrix.CompatRadar.$env:RELEASE_VERSION.snupkg"
+          dotnet nuget push $nupkg --source https://api.nuget.org/v3/index.json --api-key $env:NUGET_API_KEY --skip-duplicate
+          dotnet nuget push $snupkg --source https://api.nuget.org/v3/index.json --api-key $env:NUGET_API_KEY --skip-duplicate

@@ -235,6 +235,10 @@ jobs:
             finally { $archive.Dispose() }
           }
 
+      - name: Complete package contract inspection
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.0 -ExpectedCommit $env:GITHUB_SHA
+
       - name: Upload packed tool for cross-platform consumer smoke
         uses: actions/upload-artifact@v7
         with:
@@ -303,3 +307,71 @@ jobs:
             }
           }
           if ($telemetryFiles.Count -gt 0) { throw "Telemetry artifacts were produced in package smoke: $($telemetryFiles -join ', ')" }
+
+  action-smoke:
+    name: GitHub Action smoke
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up pinned .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.424
+
+      - name: Download freshly packed tool
+        uses: actions/download-artifact@v7
+        with:
+          name: compatradar-package
+          path: ./artifacts/packages
+
+      - name: Install freshly packed tool in an isolated path
+        shell: bash
+        run: |
+          dotnet tool install --tool-path "$RUNNER_TEMP/compatradar-tool" --add-source "$GITHUB_WORKSPACE/artifacts/packages" --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.0 --no-cache
+          echo "$RUNNER_TEMP/compatradar-tool" >> "$GITHUB_PATH"
+
+      - name: Create Action fixture
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path action-fixture | Out-Null
+          @'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+          </Project>
+          '@ | Set-Content action-fixture/Fixture.csproj
+          @'
+          if (Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE") == "1") { Console.Error.WriteLine("planted action failure"); Environment.Exit(19); }
+          '@ | Set-Content action-fixture/Program.cs
+          @'
+          { "version": 1, "control": { "sdk": "current" }, "watch": [{ "kind": "sdk-preview", "candidates": ["8.0.424"] }], "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": "action-fixture", "timeoutSeconds": 120 }, "policy": { "confirmationRuns": 1 } }
+          '@ | Set-Content action-fixture/compat-radar.json
+
+      - name: Action pass path
+        uses: ./
+        with:
+          config: action-fixture/compat-radar.json
+          report: action-fixture/pass.json
+
+      - name: Action failure path, summary, and report
+        id: regression
+        continue-on-error: true
+        uses: ./
+        with:
+          config: action-fixture/compat-radar.json
+          report: action-fixture/failure.json
+
+      - name: Assert Action contract
+        shell: pwsh
+        env:
+          REGRESSION_OUTCOME: ${{ steps.regression.outcome }}
+        run: |
+          if ($env:REGRESSION_OUTCOME -ne 'failure') { throw "Action failure path did not propagate failure (outcome: $env:REGRESSION_OUTCOME)." }
+          $pass = Get-Content action-fixture/pass.json -Raw | ConvertFrom-Json
+          $failure = Get-Content action-fixture/failure.json -Raw | ConvertFrom-Json
+          if ($pass.exitCode -ne 0) { throw 'Action pass report exit code mismatch.' }
+          if ($failure.exitCode -ne 1 -or $failure.findings[0].classification -ne 'FUTURE_REGRESSION') { throw 'Action failure report mismatch.' }
+          if (-not (Get-Content $env:GITHUB_STEP_SUMMARY -Raw).Contains('CompatRadar report')) { throw 'Action did not append a job summary.' }

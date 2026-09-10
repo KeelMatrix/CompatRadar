@@ -9,13 +9,48 @@ $telemetryWasSet = Test-Path Env:KEELMATRIX_NO_TELEMETRY
 $telemetryValue = $env:KEELMATRIX_NO_TELEMETRY
 $env:KEELMATRIX_NO_TELEMETRY = '1'
 $package = (Resolve-Path -LiteralPath $PackagePath).Path
+$packageName = [IO.Path]::GetFileNameWithoutExtension($package)
+if ($packageName -notmatch '^KeelMatrix\.CompatRadar\.(?<version>[^.]+(?:\.[^.]+){2,3})$') { throw "Unexpected CompatRadar package name '$packageName'." }
+$packageVersion = $Matches.version
 $root = Join-Path ([IO.Path]::GetTempPath()) ('compat-radar-consumer-' + [guid]::NewGuid().ToString('N'))
 $toolPath = Join-Path $root 'tool'
 $fixture = Join-Path $root 'fixture'
-New-Item -ItemType Directory -Path $toolPath, $fixture | Out-Null
+$packages = Join-Path $root 'nuget-packages'
+$httpCache = Join-Path $root 'nuget-http-cache'
+$nugetConfig = Join-Path $root 'NuGet.Config'
+New-Item -ItemType Directory -Path $toolPath, $fixture, $packages, $httpCache | Out-Null
+$localSource = [Security.SecurityElement]::Escape((Split-Path $package))
+$nugetXml = @"
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="fresh-local" value="$localSource" />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+  </packageSources>
+  <packageSourceMapping>
+    <packageSource key="fresh-local">
+      <package pattern="KeelMatrix.CompatRadar" />
+    </packageSource>
+    <packageSource key="nuget.org">
+      <package pattern="KeelMatrix.Telemetry" />
+      <package pattern="Microsoft.*" />
+      <package pattern="System.*" />
+      <package pattern="runtime.*" />
+      <package pattern="NETStandard.Library" />
+    </packageSource>
+  </packageSourceMapping>
+</configuration>
+"@
+Set-Content -LiteralPath $nugetConfig -Value $nugetXml -Encoding utf8
+$env:NUGET_PACKAGES = $packages
+$env:NUGET_HTTP_CACHE_PATH = $httpCache
+$env:NUGET_PLUGINS_CACHE_PATH = Join-Path $root 'nuget-plugins-cache'
+$env:DOTNET_CLI_HOME = Join-Path $root 'dotnet-home'
+New-Item -ItemType Directory -Path $env:NUGET_PLUGINS_CACHE_PATH, $env:DOTNET_CLI_HOME | Out-Null
 
 try {
-    dotnet tool install --tool-path $toolPath --add-source (Split-Path $package) --configfile (Join-Path $PSScriptRoot '..' 'NuGet.config') KeelMatrix.CompatRadar --version 0.1.0 --no-cache --ignore-failed-sources | Out-Host
+    dotnet tool install --tool-path $toolPath --configfile $nugetConfig KeelMatrix.CompatRadar --version $packageVersion --no-cache --ignore-failed-sources | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'dotnet tool install failed' }
 
     Set-Content -LiteralPath (Join-Path $fixture 'global.json') -Value @'

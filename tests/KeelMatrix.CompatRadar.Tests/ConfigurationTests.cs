@@ -181,6 +181,53 @@ public sealed class ConfigurationTests
     }
 
     [Fact]
+    public void AcceptsRuntimePreviewChannel()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "compat-radar.json"), """
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [{ "kind": "runtime-preview", "candidates": ["10.0.0-preview.1.12345.1"] }],
+  "validation": { "command": "dotnet test", "workingDirectory": ".", "timeoutSeconds": 30 },
+  "policy": { "confirmationRuns": 1 }
+}
+""");
+
+            var result = ConfigurationLoader.Load(root, "compat-radar.json");
+
+            Assert.True(result.IsValid);
+            Assert.Equal(WatchKind.RuntimePreview, result.Configuration!.Watches[0].Kind);
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
+    public void CandidateFeedIsAddedToTheIsolatedConfigWithoutReplacingExistingSources()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        var copy = Path.Combine(Path.GetTempPath(), "compat-radar-feed", Guid.NewGuid().ToString("N"));
+        try
+        {
+            MaterializationScope.CopyRepository(root, copy);
+            var result = MaterializationScope.AddCandidateFeed(copy, "https://feed.example/v3/index.json");
+            var config = File.ReadAllText(Path.Combine(copy, "NuGet.Config"));
+
+            Assert.True(result.Applied);
+            Assert.Contains("key=\"fixture\"", config, StringComparison.Ordinal);
+            Assert.Contains("key=\"compat-radar-candidate\"", config, StringComparison.Ordinal);
+            Assert.DoesNotContain("--source", config, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(root);
+            TestFixture.DeleteRepository(copy);
+        }
+    }
+
+    [Fact]
     public void SDKOverrideIsAppliedOnlyToTheMaterializedCopy()
     {
         var root = TestFixture.CreateRepository("pass");

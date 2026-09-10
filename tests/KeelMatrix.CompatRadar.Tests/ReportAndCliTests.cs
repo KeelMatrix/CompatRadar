@@ -5,6 +5,61 @@ namespace KeelMatrix.CompatRadar.Tests;
 public sealed class ReportAndCliTests
 {
     [Fact]
+    public async Task HelpAndInvalidCliShapesHaveStableStreamsAndExitCodes()
+    {
+        var output = new StringWriter();
+        var error = new StringWriter();
+        Assert.Equal(0, await RadarApplication.RunAsync([], Directory.GetCurrentDirectory(), new RecordingTelemetry(), output, error));
+        Assert.Contains("compat-radar check", output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, error.ToString());
+
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+        Assert.Equal(2, await RadarApplication.RunAsync(["unknown"], Directory.GetCurrentDirectory(), new RecordingTelemetry(), output, error));
+        Assert.Contains("Expected", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, output.ToString());
+
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+        Assert.Equal(2, await RadarApplication.RunAsync(["check", "--format"], Directory.GetCurrentDirectory(), new RecordingTelemetry(), output, error));
+        Assert.Contains("requires a value", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InvalidOptionCombinationsDoNotWriteReports()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "pass", "\"1.0.0\"");
+            var output = new StringWriter();
+            var error = new StringWriter();
+            var exitCode = await RadarApplication.RunAsync(
+                ["config", "validate", "--report", "invalid.json"],
+                root,
+                new RecordingTelemetry(),
+                output,
+                error);
+
+            Assert.Equal(2, exitCode);
+            Assert.Contains("cannot be combined", error.ToString(), StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Combine(root, "invalid.json")));
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
+    public void VersionOneReportFixtureRoundTripsWithoutSchemaDrift()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "fixtures", "v1", "compat-radar-report.json");
+        var report = ReportJson.Deserialize(File.ReadAllText(path));
+
+        Assert.NotNull(report);
+        Assert.Equal(1, report!.SchemaVersion);
+        Assert.Equal(ReportJson.Serialize(report), ReportJson.Serialize(ReportJson.Deserialize(ReportJson.Serialize(report))!));
+    }
+
+    [Fact]
     public async Task JsonReportIsDeterministicAndReproduceEmitsWitness()
     {
         var root = TestFixture.CreateRepository("monotonic");

@@ -94,6 +94,85 @@ public sealed class EngineTests
     }
 
     [Fact]
+    public async Task DifferentCandidateFailuresAreInconclusiveRatherThanFutureRegression()
+    {
+        var root = TestFixture.CreateRepository("different-failure");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "different-failure", "\"1.1.0\"", confirmationRuns: 2);
+            var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
+            var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+
+            var comparison = Assert.Single(result.Report.Watches[0].Comparisons);
+            Assert.Equal(2, result.Report.ExitCode);
+            Assert.Equal(ResultClassification.InconclusiveFlaky, comparison.Classification);
+            Assert.Equal(["failure-A", "failure-B"], comparison.CandidateResult.Attempts.Select(attempt => attempt.Summary));
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
+    public async Task DifferentStableFailuresRemainBaselineInconclusive()
+    {
+        var root = TestFixture.CreateRepository("different-baseline");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "different-baseline", "\"1.1.0\"", confirmationRuns: 2);
+            var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
+            var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+
+            var comparison = Assert.Single(result.Report.Watches[0].Comparisons);
+            Assert.Equal(2, result.Report.ExitCode);
+            Assert.Equal(ResultClassification.InconclusiveBaselineFailed, comparison.Classification);
+            Assert.Equal("INCONCLUSIVE_FLAKY", comparison.StableControl.Classification);
+            Assert.False(comparison.CandidateEvaluated);
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
+    public async Task DifferentExitCodesWithoutDiagnosticsAreInconclusive()
+    {
+        var root = TestFixture.CreateRepository("different-exit");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "different-exit", "\"1.1.0\"", confirmationRuns: 2);
+            var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
+            var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+
+            var comparison = Assert.Single(result.Report.Watches[0].Comparisons);
+            Assert.Equal(ResultClassification.InconclusiveFlaky, comparison.Classification);
+            Assert.Equal([15, 16], comparison.CandidateResult.Attempts.Select(attempt => attempt.ExitCode));
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
+    public async Task MissingSdkCandidateIsUnsupported()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "compat-radar.json"), """
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [{ "kind": "runtime-preview", "candidates": ["99.0.0"] }],
+  "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": ".", "timeoutSeconds": 30 },
+  "policy": { "confirmationRuns": 1 }
+}
+""");
+            var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
+            var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+
+            var comparison = Assert.Single(result.Report.Watches[0].Comparisons);
+            Assert.Equal(2, result.Report.ExitCode);
+            Assert.Equal(ResultClassification.Unsupported, comparison.Classification);
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
     public async Task NonMonotonicSequenceDoesNotClaimFirstBad()
     {
         var root = TestFixture.CreateRepository("non-monotonic");

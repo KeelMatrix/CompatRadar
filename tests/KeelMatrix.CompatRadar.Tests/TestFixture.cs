@@ -53,7 +53,12 @@ if (behavior == "output-bound" && candidate) Environment.Exit(17);
 if (behavior == "stable-fail" && !candidate) Environment.Exit(11);
     if (behavior == "monotonic" && candidate && (version == "1.1.0" || version == "2.0.0")) Environment.Exit(12);
     if (behavior == "non-monotonic" && candidate && version == "1.1.0") Environment.Exit(13);
-    if (behavior == "flaky" && candidate && version == "1.1.0" && attempt == "1") Environment.Exit(14);
+  if (behavior == "flaky" && candidate && version == "1.1.0" && attempt == "1") Environment.Exit(14);
+  if (behavior == "different-failure" && candidate) Console.Error.WriteLine(attempt == "1" ? "failure-A" : "failure-B");
+  if (behavior == "different-failure" && candidate) Environment.Exit(15);
+  if (behavior == "different-baseline" && !candidate) Console.Error.WriteLine(attempt == "1" ? "baseline-A" : "baseline-B");
+  if (behavior == "different-baseline" && !candidate) Environment.Exit(16);
+  if (behavior == "different-exit" && candidate) Environment.Exit(attempt == "1" ? 15 : 16);
 """);
         return root;
     }

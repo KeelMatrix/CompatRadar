@@ -73,6 +73,55 @@ public sealed class CrossPlatformTests
     }
 
     [Fact]
+    public void CaseDifferentSiblingIsNotInsideRepositoryOnCaseSensitiveSystems()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var parent = Path.Combine(Path.GetTempPath(), "compat-radar-case", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(parent, "Repository");
+        var sibling = Path.Combine(parent, "repository");
+        try
+        {
+            Directory.CreateDirectory(root);
+            Directory.CreateDirectory(sibling);
+
+            Assert.False(PathUtilities.IsWithinRoot(root, sibling));
+            Assert.False(PathUtilities.IsWithinRoot(root, Path.Combine(sibling, "compat-radar.json")));
+        }
+        finally { TestFixture.DeleteRepository(parent); }
+    }
+
+    [Fact]
+    public void ReparsePointPathIsNotInsideRepository()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        var linkedDirectory = Path.Combine(Path.GetTempPath(), "compat-radar-link", Guid.NewGuid().ToString("N"));
+        var link = Path.Combine(root, "linked-directory");
+        try
+        {
+            Directory.CreateDirectory(linkedDirectory);
+            try
+            {
+                Directory.CreateSymbolicLink(link, linkedDirectory);
+            }
+            catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+            {
+                return;
+            }
+
+            Assert.False(PathUtilities.IsWithinRoot(root, Path.Combine(link, "compat-radar.json")));
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(root);
+            TestFixture.DeleteRepository(linkedDirectory);
+        }
+    }
+
+    [Fact]
     public async Task CancellationRequestsProcessTreeTermination()
     {
         var root = TestFixture.CreateRepository("timeout");

@@ -19,4 +19,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\KeelMatrix.CompatRadar\KeelMatrix.CompatRadar.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\fixtures\v1\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="fixtures/v1" />
+  </ItemGroup>
 </Project>

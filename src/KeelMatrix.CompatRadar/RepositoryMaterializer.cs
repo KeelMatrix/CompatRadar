@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
+using System.Xml;
 
 namespace KeelMatrix.CompatRadar;
 
@@ -20,6 +21,11 @@ internal sealed class MaterializationScope : IDisposable
     public static MaterializationScope Create()
     {
         var root = Path.Combine(Path.GetTempPath(), "compat-radar", Guid.NewGuid().ToString("N"));
+        if (!PathUtilities.IsWithinRoot(Path.GetTempPath(), root))
+        {
+            throw new InvalidOperationException("The temporary materialization directory escaped the system temporary root.");
+        }
+
         Directory.CreateDirectory(root);
         return new MaterializationScope(root);
     }
@@ -158,6 +164,60 @@ internal sealed class MaterializationScope : IDisposable
         }
     }
 
+    public static FeedConfigurationResult AddCandidateFeed(string repository, string feed)
+    {
+        try
+        {
+            var configPath = Directory.EnumerateFiles(repository, "*", SearchOption.TopDirectoryOnly)
+                .FirstOrDefault(path => string.Equals(Path.GetFileName(path), "NuGet.config", StringComparison.OrdinalIgnoreCase));
+            configPath ??= Path.Combine(repository, "NuGet.config");
+
+            XDocument document;
+            if (File.Exists(configPath))
+            {
+                document = XDocument.Load(configPath, LoadOptions.PreserveWhitespace);
+            }
+            else
+            {
+                document = new XDocument(
+                    new XElement("configuration",
+                        new XElement("packageSources")));
+            }
+
+            var configuration = document.Element("configuration");
+            if (configuration is null)
+            {
+                configuration = new XElement("configuration");
+                document.Add(configuration);
+            }
+
+            var packageSources = configuration.Element("packageSources");
+            if (packageSources is null)
+            {
+                packageSources = new XElement("packageSources");
+                configuration.Add(packageSources);
+            }
+
+            var existing = packageSources.Elements("add")
+                .FirstOrDefault(element => string.Equals((string?)element.Attribute("key"), "compat-radar-candidate", StringComparison.OrdinalIgnoreCase));
+            if (existing is null)
+            {
+                packageSources.Add(new XElement("add", new XAttribute("key", "compat-radar-candidate"), new XAttribute("value", feed)));
+            }
+            else
+            {
+                existing.SetAttributeValue("value", feed);
+            }
+
+            document.Save(configPath, SaveOptions.DisableFormatting);
+            return new FeedConfigurationResult(true, null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or XmlException)
+        {
+            return new FeedConfigurationResult(false, $"The candidate feed could not be added to the isolated NuGet configuration ({exception.GetType().Name}).");
+        }
+    }
+
     public static string ComputeRepositoryRevision(string repository)
     {
         try
@@ -233,3 +293,5 @@ internal sealed class MaterializationScope : IDisposable
 }
 
 internal sealed record CandidateOverrideResult(bool Applied, int ChangedFiles, string? Error);
+
+internal sealed record FeedConfigurationResult(bool Applied, string? Error);

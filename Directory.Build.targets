@@ -6,8 +6,20 @@
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <!-- Pack is deliberately allow-listed. Local, test, research, generated, and environment files
+         are removed before the three public package files are added back explicitly. -->
+    <None Remove="**/*" />
+    <Content Remove="**/*" />
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="" Condition="Exists('$(MSBuildThisFileDirectory)README.md')" />
     <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="" Condition="Exists('$(MSBuildThisFileDirectory)LICENSE')" />
     <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="" Condition="Exists('$(MSBuildThisFileDirectory)icon.png')" />
   </ItemGroup>
+
+  <Target Name="ValidateFailClosedPackInputs" BeforeTargets="Pack" Condition="'$(IsPackable)' != 'false'">
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)README.md')" Text="Pack input README.md is required." />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)LICENSE')" Text="Pack input LICENSE is required." />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)icon.png')" Text="Pack input icon.png is required." />
+    <Error Condition="'$(PackageReadmeFile)' != 'README.md'" Text="PackageReadmeFile must remain README.md." />
+    <Error Condition="'$(PackageIcon)' != 'icon.png'" Text="PackageIcon must remain icon.png." />
+  </Target>
 </Project>
