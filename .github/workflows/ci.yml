@@ -352,6 +352,8 @@ jobs:
 
       - name: Action pass path
         uses: ./
+        env:
+          COMPATRADAR_ACTION_SUMMARY: ${{ runner.temp }}/compatradar-action-summary.md
         with:
           config: action-fixture/compat-radar.json
           report: action-fixture/pass.json
@@ -362,6 +364,7 @@ jobs:
         uses: ./
         env:
           COMPATRADAR_FORCE_ACTION_FAILURE: '1'
+          COMPATRADAR_ACTION_SUMMARY: ${{ runner.temp }}/compatradar-action-summary.md
         with:
           config: action-fixture/compat-radar.json
           report: action-fixture/failure.json
