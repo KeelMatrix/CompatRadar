@@ -277,7 +277,7 @@ jobs:
           $packageDirectory = Join-Path $PWD 'artifacts/packages'
           if (Test-Path -LiteralPath $packageDirectory) { Remove-Item -LiteralPath $packageDirectory -Recurse -Force }
           New-Item -ItemType Directory -Path $packageDirectory | Out-Null
-          dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build --no-restore --include-symbols --p:SymbolPackageFormat=snupkg --output $packageDirectory
+          dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build --no-restore --include-symbols --p:SymbolPackageFormat=snupkg --p:RepositoryCommit='${{ github.event.pull_request.head.sha || github.sha }}' --output $packageDirectory
           if ($LASTEXITCODE -ne 0) { throw 'dotnet pack failed.' }
 
       - name: Validate package set and contents
