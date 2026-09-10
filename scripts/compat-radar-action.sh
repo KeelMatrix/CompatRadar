@@ -6,11 +6,13 @@ report="${2:-compat-radar-report.json}"
 compat-radar check --config "$config" --format text --report "$report"
 status=$?
 
-if [[ -n "${GITHUB_STEP_SUMMARY:-}" && -f "$report" ]]; then
+summary_path="${GITHUB_STEP_SUMMARY:-${COMPATRADAR_ACTION_SUMMARY:-}}"
+if [[ -n "$summary_path" && -f "$report" ]]; then
+  mkdir -p "$(dirname "$summary_path")"
   {
     echo '## CompatRadar report'
     cat "$report"
-  } >> "$GITHUB_STEP_SUMMARY"
+  } >> "$summary_path"
 fi
 
 if [[ "$status" -eq 1 ]]; then

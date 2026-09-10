@@ -314,7 +314,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      GITHUB_STEP_SUMMARY: ${{ runner.temp }}/compatradar-action-summary.md
+      COMPATRADAR_ACTION_SUMMARY: ${{ runner.temp }}/compatradar-action-summary.md
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -378,4 +378,5 @@ jobs:
           $failure = Get-Content action-fixture/failure.json -Raw | ConvertFrom-Json
           if ($pass.exitCode -ne 0) { throw 'Action pass report exit code mismatch.' }
           if ($failure.exitCode -ne 1 -or $failure.findings[0].classification -ne 'FUTURE_REGRESSION') { throw 'Action failure report mismatch.' }
-          if (-not (Get-Content $env:GITHUB_STEP_SUMMARY -Raw).Contains('CompatRadar report')) { throw 'Action did not append a job summary.' }
+          $summaryPath = Join-Path $env:RUNNER_TEMP 'compatradar-action-summary.md'
+          if (-not (Get-Content $summaryPath -Raw).Contains('CompatRadar report')) { throw 'Action did not append a job summary.' }
