@@ -39,11 +39,53 @@ function Get-IconDimensions($archive) {
     } finally { $stream.Dispose() }
 }
 
+function Assert-ExactArchiveEntries($archive, [string] $packageKind) {
+    $allowed = if ($packageKind -eq 'nupkg') {
+        @(
+            '^_rels/\.rels$',
+            '^\[Content_Types\]\.xml$',
+            '^icon\.png$',
+            '^KeelMatrix\.CompatRadar\.nuspec$',
+            '^LICENSE$',
+            '^package/services/metadata/core-properties/[0-9a-f]{32}\.psmdcp$',
+            '^README\.md$',
+            '^tools/net8\.0/any/DotnetToolSettings\.xml$',
+            '^tools/net8\.0/any/KeelMatrix\.CompatRadar\.deps\.json$',
+            '^tools/net8\.0/any/KeelMatrix\.CompatRadar\.dll$',
+            '^tools/net8\.0/any/KeelMatrix\.CompatRadar\.pdb$',
+            '^tools/net8\.0/any/KeelMatrix\.CompatRadar\.runtimeconfig\.json$',
+            '^tools/net8\.0/any/KeelMatrix\.CompatRadar\.xml$',
+            '^tools/net8\.0/any/KeelMatrix\.Telemetry\.dll$'
+        )
+    } elseif ($packageKind -eq 'snupkg') {
+        @(
+            '^_rels/\.rels$',
+            '^\[Content_Types\]\.xml$',
+            '^KeelMatrix\.CompatRadar\.nuspec$',
+            '^package/services/metadata/core-properties/[0-9a-f]{32}\.psmdcp$',
+            '^tools/net8\.0/any/KeelMatrix\.CompatRadar\.pdb$'
+        )
+    } else {
+        throw "Unknown package kind '$packageKind'."
+    }
+
+    $names = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
+    $duplicates = @($names | Group-Object | Where-Object Count -gt 1 | Select-Object -ExpandProperty Name)
+    if ($duplicates.Count -gt 0) { throw "Duplicate package entries in $packageKind`: $($duplicates -join ', ')." }
+    foreach ($name in $names) {
+        if (-not (@($allowed | Where-Object { $name -match $_ }).Count -gt 0)) {
+            throw "Unexpected package entry in $packageKind`: '$name'."
+        }
+    }
+}
+
 $nupkgPath = Join-Path $directory "$id.$ExpectedVersion.nupkg"
 $symbolPath = Join-Path $directory "$id.$ExpectedVersion.snupkg"
 $nupkg = [IO.Compression.ZipFile]::OpenRead($nupkgPath)
 $symbols = [IO.Compression.ZipFile]::OpenRead($symbolPath)
 try {
+    Assert-ExactArchiveEntries $nupkg 'nupkg'
+    Assert-ExactArchiveEntries $symbols 'snupkg'
     $nuspecEntry = @($nupkg.Entries | Where-Object { $_.FullName -match "(^|/)$id\.nuspec$" }) | Select-Object -First 1
     if ($null -eq $nuspecEntry) { throw 'The package nuspec is missing.' }
     $reader = [IO.StreamReader]::new($nuspecEntry.Open())
@@ -67,8 +109,8 @@ try {
         if ($null -eq $nupkg.GetEntry($required)) { throw "Required package entry '$required' is missing." }
     }
     $icon = Get-IconDimensions $nupkg
-    if ($icon[0] -lt 1 -or $icon[1] -lt 1 -or $icon[0] -gt 2048 -or $icon[1] -gt 2048) { throw "Icon dimensions $($icon[0])x$($icon[1]) are outside the package contract." }
-    if ($nupkg.GetEntry('icon.png').Length -gt 1048576) { throw 'icon.png exceeds the 1 MiB package limit.' }
+    if ($icon[0] -ne 512 -or $icon[1] -ne 512) { throw "Icon dimensions $($icon[0])x$($icon[1]) do not match the 512x512 package contract." }
+    if ($nupkg.GetEntry('icon.png').Length -gt 204800) { throw 'icon.png exceeds the 200 KB package limit.' }
 
     $toolSettings = @($nupkg.Entries | Where-Object { $_.FullName -match '(^|/)DotnetToolSettings\.xml$' }) | Select-Object -First 1
     if ($null -eq $toolSettings) { throw 'DotnetToolSettings.xml is missing.' }

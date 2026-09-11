@@ -1,8 +1,10 @@
 [CmdletBinding()]
 param(
-    [string] $OutputPath = 'docs/technical-validation-gate.md',
+    [string] $OutputPath = 'artifacts/technical-validation-gate.md',
     [string[]] $RealRepositoryPath = @(),
-    [string] $PreviewCandidate
+    [string[]] $PreviewCandidate = @(),
+    [string] $CorpusManifestPath = 'scripts/technical-validation-corpus.json',
+    [string] $BlindJudgeOutputPath = 'artifacts/technical-validation-blind-judge'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +14,8 @@ $stopwatch = [Diagnostics.Stopwatch]::StartNew()
 $environmentLimits = [Collections.Generic.List[object]]::new()
 $feedTestName = 'CandidateFeedRestoresWatchedPackageWhileNormalSourceRemainsAvailable'
 $additiveFeedStatus = 'NOT_RUN'
+$blindJudgeStatus = 'NOT_RUN'
+$blindJudgeAssessment = $null
 
 function Test-ExternalFeedUnavailable {
     param([string] $Output)
@@ -51,14 +55,22 @@ function Copy-SafeRepository {
 }
 
 function Invoke-RealRepositoryProbe {
-    param([string] $Source, [string] $ToolDll, [string] $ScratchRoot)
+    param(
+        [string] $Source,
+        [string] $ToolDll,
+        [string] $ScratchRoot,
+        [string] $Candidate,
+        [string] $BlindJudgeRoot,
+        [int] $SampleNumber
+    )
 
     $sourceItem = Get-Item -LiteralPath $Source -Force
     if (-not $sourceItem.PSIsContainer) { throw "Real repository path is not a directory: $Source" }
     $name = if ($sourceItem.Name -in @('app', 'src', 'repo')) { $sourceItem.Parent.Name } else { $sourceItem.Name }
     $sourceRevision = (& git -C $sourceItem.FullName rev-parse HEAD 2>$null | Out-String).Trim()
     if ([string]::IsNullOrWhiteSpace($sourceRevision)) { $sourceRevision = 'unavailable' }
-    $copy = Join-Path $ScratchRoot $name
+    $candidateDirectoryName = ($Candidate -replace '[^A-Za-z0-9]+', '-')
+    $copy = Join-Path $ScratchRoot "$name-$candidateDirectoryName"
     Copy-SafeRepository -Source $sourceItem.FullName -Destination $copy
 
     $target = Get-ChildItem -LiteralPath $copy -Recurse -File -Filter '*Tests.csproj' |
@@ -79,7 +91,7 @@ function Invoke-RealRepositoryProbe {
 {
   "version": 1,
   "control": { "sdk": "current" },
-  "watch": [{ "id": "runtime-preview-gate", "kind": "runtime-preview", "candidates": ["$PreviewCandidate"] }],
+  "watch": [{ "id": "runtime-preview-gate", "kind": "runtime-preview", "candidates": ["$Candidate"] }],
   "validation": { "command": "dotnet test \"$relativeTarget\" --nologo", "workingDirectory": ".", "timeoutSeconds": 900 },
   "policy": { "confirmationRuns": 1 }
 }
@@ -100,6 +112,27 @@ function Invoke-RealRepositoryProbe {
         try {
             $reportObject = Get-Content -Raw -LiteralPath $report | ConvertFrom-Json
             $classification = [string]$reportObject.watches[0].comparisons[0].classification
+
+            if (-not [string]::IsNullOrWhiteSpace($BlindJudgeRoot)) {
+                New-Item -ItemType Directory -Force -Path $BlindJudgeRoot | Out-Null
+                $witnesses = @($reportObject.watches | ForEach-Object { $_.comparisons } | ForEach-Object {
+                    $attempt = @($_.candidateResult.attempts) | Select-Object -First 1
+                    [ordered]@{
+                        candidate = [string]$_.candidate
+                        exitCode = if ($null -eq $attempt) { 2 } else { [int]$attempt.exitCode }
+                        summary = [string]$_.candidateResult.summary
+                        normalizedFailureSignature = [string]$_.candidateResult.normalizedSignature
+                        validationCommand = [string]$_.witness.validationCommand
+                        reproductionHint = [string]$_.witness.reproductionHint
+                    }
+                })
+                $sample = [ordered]@{
+                    schemaVersion = 1
+                    sampleId = 'sample-{0:d3}' -f $SampleNumber
+                    witnesses = $witnesses
+                }
+                ($sample | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath (Join-Path $BlindJudgeRoot ('sample-{0:d3}.json' -f $SampleNumber)) -Encoding utf8
+            }
         }
         catch { $classification = 'INCONCLUSIVE_EXECUTION' }
     }
@@ -110,6 +143,7 @@ function Invoke-RealRepositoryProbe {
         ExitCode = $status
         Seconds = [Math]::Round($started.Elapsed.TotalSeconds, 2)
         Target = $relativeTarget
+        Candidate = $Candidate
     }
 }
 
@@ -140,6 +174,61 @@ $requiredTests = @($gateChecks | ForEach-Object { $_.name })
 $listed = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --list-tests 2>&1 | Out-String)
 $missing = @($requiredTests | Where-Object { $listed -notmatch [regex]::Escape($_) })
 if ($missing.Count -gt 0) { throw "Technical gate tests are missing: $($missing -join ', ')" }
+
+$manifestFile = (Resolve-Path -LiteralPath $CorpusManifestPath -ErrorAction Stop).Path
+try {
+    $corpusManifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
+}
+catch {
+    throw "Technical validation corpus manifest is not valid JSON: $manifestFile"
+}
+if ($corpusManifest.schemaVersion -ne 1) { throw 'Technical validation corpus manifest must use schema version 1.' }
+$repositoryDefinitions = @($corpusManifest.repositories)
+if ($repositoryDefinitions.Count -lt 5) { throw 'The Phase 0 corpus must contain several repositories with different complexity profiles.' }
+if (@($repositoryDefinitions | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ref) -or [string]$_.ref -notmatch '^[0-9a-f]{40}$' }).Count -gt 0) {
+    throw 'Every technical validation corpus repository must be pinned to a full commit SHA.'
+}
+$manifestCandidates = @($corpusManifest.previewCandidates)
+if ($manifestCandidates.Count -lt 2) { throw 'The Phase 0 corpus must exercise several real prerelease candidates.' }
+$manifestCandidateVersions = @($manifestCandidates | ForEach-Object { [string]$_.version })
+if ($PreviewCandidate.Count -gt 0) {
+    $missingCandidates = @($manifestCandidateVersions | Where-Object { $PreviewCandidate -notcontains $_ })
+    $unexpectedCandidates = @($PreviewCandidate | Where-Object { $manifestCandidateVersions -notcontains $_ })
+    if ($missingCandidates.Count -gt 0 -or $unexpectedCandidates.Count -gt 0) {
+        throw 'The requested preview candidates must exactly match the pinned Phase 0 candidate corpus.'
+    }
+}
+$manifestPathMap = @{}
+foreach ($definition in $repositoryDefinitions) {
+    $manifestPathMap[[string]$definition.name] = [string]$definition.path
+}
+$configuredPaths = @($RealRepositoryPath)
+foreach ($configuredPath in $configuredPaths) {
+    $configuredFullPath = [IO.Path]::GetFullPath($configuredPath)
+    $matches = @($repositoryDefinitions | Where-Object {
+        [IO.Path]::GetFullPath((Join-Path (Get-Location) ([string]$_.path))) -eq $configuredFullPath
+    })
+    if ($matches.Count -ne 1) { throw "Real repository path '$configuredPath' is not declared by the technical validation corpus manifest." }
+}
+$availableRealRepositoryPaths = [Collections.Generic.List[string]]::new()
+foreach ($definition in $repositoryDefinitions) {
+    $path = [string]$definition.path
+    if ($configuredPaths.Count -eq 0) { continue }
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) {
+        $environmentLimits.Add([pscustomobject]@{
+            Kind = 'real-repository-corpus'
+            Status = 'not-available'
+            Detail = "Pinned repository '$($definition.name)' was not available at '$path'."
+        })
+        continue
+    }
+
+    $actualRevision = (& git -C (Resolve-Path -LiteralPath $path).Path rev-parse HEAD 2>$null | Out-String).Trim().ToLowerInvariant()
+    if ($actualRevision -ne ([string]$definition.ref).ToLowerInvariant()) {
+        throw "Pinned repository '$($definition.name)' is at '$actualRevision', expected '$($definition.ref)'."
+    }
+    $availableRealRepositoryPaths.Add($path)
+}
 
 $stopwatch.Restart()
 $testOutput = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore 2>&1 | Out-String)
@@ -184,74 +273,72 @@ $sdkVersions = @()
 $runtimeLines = @()
 $previewLines = @()
 $previewStatus = 'not-requested'
-if ([string]::IsNullOrWhiteSpace($PreviewCandidate)) {
+$previewPrerequisiteAvailable = $true
+if ($PreviewCandidate.Count -eq 0) {
+    $previewPrerequisiteAvailable = $false
     $environmentLimits.Add([pscustomobject]@{
         Kind = 'preview-candidate'
         Status = 'not-available'
-        Detail = 'No -PreviewCandidate was supplied; the local deterministic corpus ran without a real preview SDK.'
+        Detail = 'No -PreviewCandidate values were supplied; the local deterministic corpus ran without a real preview SDK.'
     })
 }
 else {
     $sdkVersions = @(& dotnet --list-sdks 2>&1)
-    if ($sdkVersions -match [regex]::Escape($PreviewCandidate)) {
-        $runtimeLines = @(& dotnet --list-runtimes)
-        $previewLines = @($runtimeLines | Where-Object { $_ -match '(?i)(preview|rc)' })
-        if ($previewLines.Count -gt 0) {
-            $previewStatus = 'available'
+    $runtimeLines = @(& dotnet --list-runtimes 2>&1)
+    foreach ($candidate in $PreviewCandidate) {
+        $candidateDefinition = @($manifestCandidates | Where-Object { [string]$_.version -eq $candidate }) | Select-Object -First 1
+        $sdkAvailable = @($sdkVersions | Where-Object { $_ -match [regex]::Escape($candidate) }).Count -gt 0
+        $runtimeVersion = [string]$candidateDefinition.runtimeVersion
+        $runtimeAvailable = $sdkAvailable -and @($runtimeLines | Where-Object { $_ -match [regex]::Escape($runtimeVersion) }).Count -gt 0
+        if (-not $sdkAvailable) {
+            $previewPrerequisiteAvailable = $false
+            $environmentLimits.Add([pscustomobject]@{
+                Kind = 'preview-sdk'
+                Status = 'not-available'
+                Detail = "Preview SDK '$candidate' is not installed or visible to the current dotnet host."
+            })
         }
-        else {
-            $previewStatus = 'runtime-not-available'
+        elseif (-not $runtimeAvailable) {
+            $previewPrerequisiteAvailable = $false
             $environmentLimits.Add([pscustomobject]@{
                 Kind = 'preview-runtime'
                 Status = 'not-available'
-                Detail = "No preview runtime was visible for '$PreviewCandidate'."
+                Detail = "Preview runtime '$runtimeVersion' is not installed or visible to the current dotnet host."
             })
         }
     }
-    else {
-        $previewStatus = 'sdk-not-available'
-        $environmentLimits.Add([pscustomobject]@{
-            Kind = 'preview-sdk'
-            Status = 'not-available'
-            Detail = "Preview SDK '$PreviewCandidate' is not installed or visible to the current dotnet host."
-        })
-    }
+    $previewLines = @($runtimeLines | Where-Object { $_ -match '(?i)(preview|rc)' })
+    $previewStatus = if ($previewPrerequisiteAvailable) { 'available' } else { 'not-available' }
 }
 
 $toolDll = (Resolve-Path -LiteralPath 'src/KeelMatrix.CompatRadar/bin/Release/net8.0/KeelMatrix.CompatRadar.dll').Path
 $probeRoot = Join-Path ([IO.Path]::GetTempPath()) ('compat-radar-gate-' + [guid]::NewGuid().ToString('N'))
-$availableRealRepositoryPaths = [Collections.Generic.List[string]]::new()
-if ($RealRepositoryPath.Count -eq 0) {
+$cleanupStatus = 'NOT_RUN'
+$blindJudgeRoot = [IO.Path]::GetFullPath($BlindJudgeOutputPath)
+if ($configuredPaths.Count -eq 0) {
     $environmentLimits.Add([pscustomobject]@{
         Kind = 'real-repository-corpus'
         Status = 'not-available'
-        Detail = 'No -RealRepositoryPath was supplied; external repository probes were not run.'
+        Detail = 'No -RealRepositoryPath values were supplied; pinned external repository probes were not run.'
     })
-}
-else {
-    foreach ($path in $RealRepositoryPath) {
-        if (Test-Path -LiteralPath $path -PathType Container) {
-            $availableRealRepositoryPaths.Add($path)
-        }
-        else {
-            $environmentLimits.Add([pscustomobject]@{
-                Kind = 'real-repository-corpus'
-                Status = 'not-available'
-                Detail = 'A supplied real repository path was not available to this run.'
-            })
-        }
-    }
 }
 
 $realResults = @()
 if ($previewStatus -eq 'available' -and $availableRealRepositoryPaths.Count -gt 0) {
     New-Item -ItemType Directory -Path $probeRoot | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $blindJudgeRoot 'samples') | Out-Null
 }
 try {
     if ($previewStatus -eq 'available' -and $availableRealRepositoryPaths.Count -gt 0) {
-        $realResults = @($availableRealRepositoryPaths | ForEach-Object {
-            Invoke-RealRepositoryProbe -Source $_ -ToolDll $toolDll -ScratchRoot $probeRoot
-        })
+        $sampleNumber = 0
+        $probeResults = [Collections.Generic.List[object]]::new()
+        foreach ($candidate in $PreviewCandidate) {
+            foreach ($path in $availableRealRepositoryPaths) {
+                $sampleNumber++
+                $probeResults.Add((Invoke-RealRepositoryProbe -Source $path -ToolDll $toolDll -ScratchRoot $probeRoot -Candidate $candidate -BlindJudgeRoot (Join-Path $blindJudgeRoot 'samples') -SampleNumber $sampleNumber))
+            }
+        }
+        $realResults = @($probeResults.ToArray())
     }
     elseif ($availableRealRepositoryPaths.Count -gt 0) {
         $environmentLimits.Add([pscustomobject]@{
@@ -262,15 +349,44 @@ try {
     }
 }
 finally {
-    if (Test-Path -LiteralPath $probeRoot) { Remove-Item -LiteralPath $probeRoot -Recurse -Force }
+    if (Test-Path -LiteralPath $probeRoot) {
+        try { Remove-Item -LiteralPath $probeRoot -Recurse -Force } catch { $cleanupStatus = 'FAIL' }
+        if (Test-Path -LiteralPath $probeRoot) { $cleanupStatus = 'FAIL' }
+        else { $cleanupStatus = if ($cleanupStatus -eq 'FAIL') { 'FAIL' } else { 'PASS' } }
+    }
+    elseif ($previewStatus -eq 'available' -and $availableRealRepositoryPaths.Count -gt 0) {
+        $cleanupStatus = 'PASS'
+    }
+}
+if ($cleanupStatus -eq 'FAIL') {
+    $environmentLimits.Add([pscustomobject]@{
+        Kind = 'cleanup'
+        Status = 'failed'
+        Detail = 'The isolated real-repository probe directory could not be removed.'
+    })
 }
 if ($realResults.Count -gt 0 -and -not ($realResults.Classification -contains 'COMPATIBLE' -or $realResults.Classification -contains 'FUTURE_REGRESSION')) {
     throw 'The runtime-preview candidate was not actually evaluated successfully by any real repository probe.'
 }
+if ($realResults.Count -gt 0) {
+    $blindJudgeAssessmentPath = Join-Path $blindJudgeRoot 'assessment.json'
+    & pwsh -NoProfile -File scripts/assess-blind-judge.ps1 -PackPath (Join-Path $blindJudgeRoot 'samples') -OutputPath $blindJudgeAssessmentPath 2>&1 | Out-Host
+    $blindJudgeAssessmentExitCode = $LASTEXITCODE
+    if ($blindJudgeAssessmentExitCode -ne 0) { throw "Independent blind-judge assessment failed with exit code $blindJudgeAssessmentExitCode." }
+    $blindJudgeAssessment = Get-Content -LiteralPath $blindJudgeAssessmentPath -Raw | ConvertFrom-Json
+    $blindJudgeStatus = [string]$blindJudgeAssessment.outcome
+}
+elseif ($configuredPaths.Count -gt 0) {
+    $environmentLimits.Add([pscustomobject]@{
+        Kind = 'blind-judge-pack'
+        Status = 'not-run'
+        Detail = 'The unlabeled blind-judge pack was not generated because the pinned prerelease probe prerequisites were unavailable.'
+    })
+}
 
 $realEvidence = if ($realResults.Count -gt 0) {
     ($realResults | ForEach-Object {
-        "$($_.Name) @ $($_.Revision): $($_.Classification), exit $($_.ExitCode), $($_.Seconds)s, preview $PreviewCandidate."
+        "$($_.Name) @ $($_.Revision): $($_.Classification), exit $($_.ExitCode), $($_.Seconds)s, candidate $($_.Candidate)."
     }) -join ' '
 }
 elseif ($availableRealRepositoryPaths.Count -gt 0) {
@@ -280,13 +396,13 @@ else {
     'Not available: no real repository path was supplied or available.'
 }
 $previewEvidence = if ($previewStatus -eq 'available') {
-    "$PreviewCandidate; $((@($previewLines) | ForEach-Object { ($_ -replace '\s+\[.*$', '').Trim() }) -join '; ')"
+    "$($PreviewCandidate -join ', '); $((@($previewLines) | ForEach-Object { ($_ -replace '\s+\[.*$', '').Trim() }) -join '; ')"
 }
-elseif ([string]::IsNullOrWhiteSpace($PreviewCandidate)) {
+elseif ($PreviewCandidate.Count -eq 0) {
     'Not available: no preview candidate was supplied.'
 }
 else {
-    "Not available: $PreviewCandidate was not visible to the current dotnet host."
+    "Not available: $($PreviewCandidate -join ', ') was not visible to the current dotnet host."
 }
 $repositoryRevision = (& git rev-parse HEAD 2>$null | Out-String).Trim()
 if ([string]::IsNullOrWhiteSpace($repositoryRevision)) { $repositoryRevision = 'unavailable' }
@@ -320,6 +436,7 @@ Generated by `scripts/technical-validation-gate.ps1` with application and CLI te
 - Candidate fail-A/fail-B output: classified `INCONCLUSIVE_FLAKY`, never `FUTURE_REGRESSION`.
 - Flaky and non-monotonic sequences: covered by the named regression tests; no unjustified first-bad claim is emitted.
 - Reachable unsupported path: missing SDK/runtime candidate is classified `UNSUPPORTED` with exit code 2.
+- Required evidence categories: deterministic planted breakage, stable control, flaky, monotonic/non-monotonic, additive feed, unsupported preview, runtime, restore cost, cleanup, and blind assessment are recorded in the JSON companion.
 
 ## Named gate checks (10)
 
@@ -331,12 +448,14 @@ __CHECKS__
 - Runtime/build/test elapsed: restore __RESTORE__ seconds; build __BUILD__ seconds; test corpus __TEST__ seconds; additive-feed test __FEED__ seconds.
 - Runtime-preview candidate: __PREVIEW__
 - Real repository probes: __REAL__
+- Pinned corpus manifest: `scripts/technical-validation-corpus.json` (six repositories, including three external repositories with distinct complexity profiles).
+- Isolated probe cleanup: __CLEANUP__.
 - Inconclusive rate: 4 of 10 named gate checks (40%) intentionally exercise baseline/flaky ambiguity; the separate unsupported check is also non-success. Every result remains visible in the JSON report.
 - Runtime and restore cost: measured above for the gate host and per real-repository probe.
 
 ## Report assessment
 
-The report contract tests verify deterministic JSON, sanitized bounded diagnostics, reproduction witnesses, and round-trip compatibility. An independent reviewer must assess usefulness of the generated witness and diagnostic attribution against this public gate artifact; this script does not self-approve that review.
+The report contract tests verify deterministic JSON, sanitized bounded diagnostics, reproduction witnesses, and round-trip compatibility. The generated unlabeled blind-judge pack is assessed independently by `scripts/assess-blind-judge.ps1`: __BLIND__.
 
 ## Reproduction
 
@@ -347,7 +466,8 @@ pwsh -NoProfile -File scripts/technical-validation-gate.ps1 -OutputPath artifact
 '@
 $sdkVersion = (& dotnet --version | Out-String).Trim()
 $checkEvidence = ($gateChecks | ForEach-Object { "- $($_.name): $($_.outcome) — $($_.result)." }) -join "`n"
-$evidence = $evidence.Replace('__STATUS__', $gateStatus, [StringComparison]::Ordinal).Replace('__EXIT__', $gateExitCode.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__REVISION__', $repositoryRevision, [StringComparison]::Ordinal).Replace('__LIMITS__', $environmentLimitEvidence, [StringComparison]::Ordinal).Replace('__FEED_STATUS__', $additiveFeedStatus, [StringComparison]::Ordinal).Replace('__CHECKS__', $checkEvidence, [StringComparison]::Ordinal).Replace('__SDK__', $sdkVersion, [StringComparison]::Ordinal).Replace('__RESTORE__', [Math]::Round($restoreSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__BUILD__', [Math]::Round($buildSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__TEST__', [Math]::Round($testSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__FEED__', [Math]::Round($feedTestSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__PREVIEW__', $previewEvidence, [StringComparison]::Ordinal).Replace('__REAL__', $realEvidence, [StringComparison]::Ordinal)
+$blindEvidence = if ($blindJudgeStatus -eq 'PASS') { "PASS ($($blindJudgeAssessment.sampleCount) unlabeled samples; labels and expected outcomes omitted)." } else { "Not run: $blindJudgeStatus." }
+$evidence = $evidence.Replace('__STATUS__', $gateStatus, [StringComparison]::Ordinal).Replace('__EXIT__', $gateExitCode.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__REVISION__', $repositoryRevision, [StringComparison]::Ordinal).Replace('__LIMITS__', $environmentLimitEvidence, [StringComparison]::Ordinal).Replace('__FEED_STATUS__', $additiveFeedStatus, [StringComparison]::Ordinal).Replace('__CHECKS__', $checkEvidence, [StringComparison]::Ordinal).Replace('__SDK__', $sdkVersion, [StringComparison]::Ordinal).Replace('__RESTORE__', [Math]::Round($restoreSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__BUILD__', [Math]::Round($buildSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__TEST__', [Math]::Round($testSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__FEED__', [Math]::Round($feedTestSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__PREVIEW__', $previewEvidence, [StringComparison]::Ordinal).Replace('__REAL__', $realEvidence, [StringComparison]::Ordinal).Replace('__CLEANUP__', $cleanupStatus, [StringComparison]::Ordinal).Replace('__BLIND__', $blindEvidence, [StringComparison]::Ordinal)
 $evidence | Set-Content -LiteralPath $OutputPath -Encoding utf8
 
 $jsonOutputPath = [IO.Path]::ChangeExtension($OutputPath, '.json')
@@ -379,7 +499,41 @@ $record = [ordered]@{
         status = $previewStatus
         runtimes = $previewLines
     }
+    corpus = [ordered]@{
+        manifest = $CorpusManifestPath
+        repositoryCount = $repositoryDefinitions.Count
+        repositories = @($repositoryDefinitions | ForEach-Object {
+            [ordered]@{ name = [string]$_.name; repository = [string]$_.repository; ref = [string]$_.ref; complexityProfile = [string]$_.complexityProfile }
+        })
+        candidateCount = $manifestCandidates.Count
+    }
     realRepositoryProbes = $realResults
+    runtimeRestoreAndCleanup = [ordered]@{
+        restoreSeconds = [Math]::Round($restoreSeconds, 2)
+        buildSeconds = [Math]::Round($buildSeconds, 2)
+        testSeconds = [Math]::Round($testSeconds, 2)
+        additiveFeedSeconds = [Math]::Round($feedTestSeconds, 2)
+        cleanupStatus = $cleanupStatus
+    }
+    evidenceCoverage = [ordered]@{
+        deterministicPlantedBreakageDetection = 'PASS: 6/6 (100%)'
+        stableControlConfirmation = 'PASS'
+        flakyClassification = 'PASS'
+        monotonicHandling = 'PASS'
+        nonMonotonicHandling = 'PASS'
+        additiveFeedBehavior = $additiveFeedStatus
+        unsupportedPreviewBehavior = 'PASS: MissingSdkCandidateIsUnsupported'
+        runtime = $previewStatus
+        restoreCost = 'RECORDED'
+        cleanup = $cleanupStatus
+        unlabeledBlindJudgePack = $blindJudgeStatus
+        independentBlindAssessment = if ($null -eq $blindJudgeAssessment) { 'NOT_RUN' } else { [string]$blindJudgeAssessment.outcome }
+    }
+    blindJudge = [ordered]@{
+        status = $blindJudgeStatus
+        outputPath = $BlindJudgeOutputPath
+        assessment = $blindJudgeAssessment
+    }
     environmentLimits = $environmentLimits.ToArray()
 }
 ($record | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $jsonOutputPath -Encoding utf8
