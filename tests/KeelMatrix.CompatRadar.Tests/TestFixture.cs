@@ -132,6 +132,13 @@ if (behavior == "stable-fail" && !candidate) Environment.Exit(11);
             try
             {
                 if (!Directory.Exists(root)) return;
+
+                foreach (var entry in Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories))
+                {
+                    File.SetAttributes(entry, FileAttributes.Normal);
+                }
+
+                File.SetAttributes(root, FileAttributes.Normal);
                 Directory.Delete(root, recursive: true);
                 if (!Directory.Exists(root)) return;
             }

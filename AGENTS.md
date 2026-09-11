@@ -44,3 +44,15 @@ dotnet run --project src/KeelMatrix.CompatRadar -- check --format json
 ## Validation strategy
 
 Start with the matching test class, then run the test project, Release build, format verification, package inspection, and isolated package-consumer smoke. Record cross-platform or network checks that cannot run locally rather than inferring their results.
+
+## Release preparation
+
+Before creating a release tag, finalize the target entry in `CHANGELOG.md`, commit and push that change, and verify the exact commit with the repository changelog contract:
+
+```powershell
+$releaseVersion = '0.1.0'
+$releaseCommit = (git rev-parse HEAD).Trim()
+pwsh -NoProfile -File scripts/Test-ChangelogContract.ps1 -RepositoryPath $PWD -ChangelogPath CHANGELOG.md -ExpectedVersion $releaseVersion -ExpectedPackageVersion $releaseVersion -ExpectedCommit $releaseCommit
+```
+
+Run this check after the finalization commit and before creating the tag. The tag-triggered release workflow runs the same check again against the checked-out commit before restoring, packing, or publishing.
