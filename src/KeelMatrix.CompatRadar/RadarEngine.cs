@@ -524,12 +524,36 @@ internal sealed class RadarEngine
 
     private static RunEvidence CreateNotEvaluatedEvidence(ParsedCommand command, string workingDirectory, string summary)
     {
-        return new RunEvidence("NOT_EVALUATED_BASELINE_FAILED", false, command.Display, workingDirectory, null, summary, "candidate-not-evaluated-baseline-failed", "candidate-not-evaluated", []);
+        return new RunEvidence(
+            "NOT_EVALUATED_BASELINE_FAILED",
+            false,
+            command.Display,
+            workingDirectory,
+            null,
+            summary,
+            "candidate-not-evaluated-baseline-failed",
+            "candidate-not-evaluated",
+            [CreateSyntheticAttempt(summary, "candidate-not-evaluated-baseline-failed", "candidate-not-evaluated")]);
     }
 
     private static RunEvidence CreateExecutionFailureEvidence(ParsedCommand command, string workingDirectory, string summary)
     {
-        return new RunEvidence("INCONCLUSIVE_EXECUTION", false, command.Display, workingDirectory, null, summary, summary, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(summary)))[..16], []);
+        var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(summary)))[..16];
+        return new RunEvidence(
+            "INCONCLUSIVE_EXECUTION",
+            false,
+            command.Display,
+            workingDirectory,
+            null,
+            summary,
+            summary,
+            fingerprint,
+            [CreateSyntheticAttempt(summary, summary, fingerprint)]);
+    }
+
+    private static ProcessAttempt CreateSyntheticAttempt(string summary, string normalizedSignature, string fingerprint)
+    {
+        return new ProcessAttempt(2, false, false, false, "not-evaluated", summary, normalizedSignature, fingerprint);
     }
 }
 

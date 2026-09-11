@@ -36,6 +36,10 @@ public sealed class EngineTests
             Assert.Equal(ResultClassification.InconclusiveBaselineFailed, comparison.Classification);
             Assert.False(comparison.CandidateEvaluated);
             Assert.Equal("NOT_EVALUATED_BASELINE_FAILED", comparison.CandidateResult.Classification);
+            var candidateAttempt = Assert.Single(comparison.CandidateResult.Attempts);
+            Assert.Equal("not-evaluated", candidateAttempt.FailureKind);
+            Assert.Contains("stable control did not pass", candidateAttempt.Summary, StringComparison.Ordinal);
+            Assert.Equal(comparison.CandidateResult.Attempts, comparison.Witness.CandidateAttempts);
         }
         finally { TestFixture.DeleteRepository(root); }
     }
