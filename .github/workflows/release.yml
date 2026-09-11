@@ -35,6 +35,12 @@ jobs:
           fi
           echo 'release_version=0.1.0' >> "$GITHUB_OUTPUT"
 
+      - name: Validate changelog and version contract
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
+        run: pwsh -NoProfile -File ./scripts/Test-ChangelogContract.ps1 -RepositoryPath $PWD -ChangelogPath CHANGELOG.md -ExpectedVersion $env:RELEASE_VERSION -ExpectedPackageVersion $env:RELEASE_VERSION -ExpectedCommit $env:GITHUB_SHA
+
       - name: Set up pinned .NET SDK
         uses: actions/setup-dotnet@v6
         with:
