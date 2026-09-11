@@ -1,5 +1,5 @@
 name: CompatRadar
-description: Test a .NET repository against explicit future SDK or NuGet candidates.
+description: Test a .NET repository against explicit future SDK, runtime, or NuGet candidates.
 inputs:
   config:
     description: Repository-relative CompatRadar configuration path.

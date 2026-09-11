@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace KeelMatrix.CompatRadar.Tests;
 
 public sealed class EngineTests
@@ -159,7 +161,7 @@ public sealed class EngineTests
     }
 
     [Fact]
-    public async Task MissingSdkCandidateIsUnsupported()
+    public async Task MissingRuntimeCandidateIsUnsupported()
     {
         var root = TestFixture.CreateRepository("pass");
         try
@@ -179,6 +181,62 @@ public sealed class EngineTests
             var comparison = Assert.Single(result.Report.Watches[0].Comparisons);
             Assert.Equal(2, result.Report.ExitCode);
             Assert.Equal(ResultClassification.Unsupported, comparison.Classification);
+            Assert.False(comparison.CandidateEvaluated);
+            Assert.Contains("RuntimeFrameworkVersion=99.0.0", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
+            Assert.DoesNotContain("99.0.0", File.ReadAllText(Path.Combine(root, "global.json")), StringComparison.Ordinal);
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
+    public async Task InstalledRuntimePreviewIsSelectedIndependentlyOfTheSdk()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            var candidate = TestFixture.FindInstalledRuntimeVersion();
+            TestFixture.WriteRuntimeConfiguration(root, "runtime-selection", candidate);
+            var before = TestFixture.HashTree(root);
+            var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
+            var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+            var comparison = Assert.Single(result.Report.Watches[0].Comparisons);
+
+            Assert.Equal(ResultClassification.Compatible, comparison.Classification);
+            Assert.True(comparison.CandidateEvaluated);
+            Assert.Contains("runtime-selection-confirmed", comparison.CandidateResult.Attempts[0].Summary, StringComparison.Ordinal);
+            Assert.Contains($"RuntimeFrameworkVersion={candidate}", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
+            Assert.Contains("RollForward=Disable", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
+            Assert.Contains($"\"runtime\":\"{candidate}\"", comparison.Witness.CandidateInputConfiguration, StringComparison.Ordinal);
+            Assert.Equal(candidate, comparison.Witness.Runtime);
+            Assert.Null(comparison.Witness.Sdk);
+            using var report = JsonDocument.Parse(ReportJson.Serialize(result.Report));
+            Assert.Equal(candidate, report.RootElement
+                .GetProperty("watches")[0]
+                .GetProperty("comparisons")[0]
+                .GetProperty("witness")
+                .GetProperty("runtime")
+                .GetString());
+            Assert.Equal(before, TestFixture.HashTree(root));
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
+    public async Task InstalledRuntimePreviewCanProduceAConfirmedFutureRegression()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            var candidate = TestFixture.FindInstalledRuntimeVersion();
+            TestFixture.WriteRuntimeConfiguration(root, "runtime-selection-failure", candidate, confirmationRuns: 2);
+            var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
+            var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+            var comparison = Assert.Single(result.Report.Watches[0].Comparisons);
+
+            Assert.Equal(ResultClassification.FutureRegression, comparison.Classification);
+            Assert.Equal(candidate, comparison.Witness.Runtime);
+            Assert.Equal(2, comparison.CandidateResult.Attempts.Count);
+            Assert.All(comparison.CandidateResult.Attempts, attempt => Assert.Contains("runtime-selection-confirmed", attempt.Summary, StringComparison.Ordinal));
         }
         finally { TestFixture.DeleteRepository(root); }
     }

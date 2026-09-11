@@ -103,6 +103,7 @@ internal sealed record ReproductionWitness(
     string? Candidate,
     string? Feed,
     string? Sdk,
+    string? Runtime,
     string? FocusedFailure,
     string NormalizedFailureSignature,
     string Fingerprint,

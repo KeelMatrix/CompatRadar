@@ -301,7 +301,10 @@ internal static class ProcessRunner
             || normalized.Contains("The framework 'Microsoft.NETCore.App'", StringComparison.OrdinalIgnoreCase)
             || normalized.Contains("It was not possible to find any compatible framework version", StringComparison.OrdinalIgnoreCase)
             || normalized.Contains("The specified framework", StringComparison.OrdinalIgnoreCase) && normalized.Contains("was not found", StringComparison.OrdinalIgnoreCase)
-            || normalized.Contains("The required library", StringComparison.OrdinalIgnoreCase) && normalized.Contains("was not found", StringComparison.OrdinalIgnoreCase);
+            || normalized.Contains("The required library", StringComparison.OrdinalIgnoreCase) && normalized.Contains("was not found", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("You must install or update .NET to run this application", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("Framework: 'Microsoft.NETCore.App'", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("To install missing framework", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<string> ReadBoundedAsync(Stream stream, int limit)

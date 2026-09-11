@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.IO.Compression;
+using System.Diagnostics;
 
 namespace KeelMatrix.CompatRadar.Tests;
 
@@ -85,6 +86,81 @@ if (behavior == "stable-fail" && !candidate) Environment.Exit(11);
   "policy": { "confirmationRuns": {{confirmationRuns}} }
 }
 """);
+    }
+
+    public static void WriteRuntimeConfiguration(string root, string behavior, string candidate, int confirmationRuns = 1)
+    {
+        File.WriteAllText(Path.Combine(root, "compat-radar.json"), $$"""
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [
+    {
+      "id": "runtime-watch",
+      "kind": "runtime-preview",
+      "candidates": ["{{candidate}}"]
+    }
+  ],
+  "validation": {
+    "command": "dotnet run --project Fixture.csproj --no-restore --nologo",
+    "workingDirectory": ".",
+    "timeoutSeconds": 60
+  },
+  "policy": { "confirmationRuns": {{confirmationRuns}} }
+}
+""");
+
+        File.WriteAllText(Path.Combine(root, "Program.cs"), $$"""
+using System;
+using System.Runtime.InteropServices;
+var candidate = Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE") == "1";
+var selectedRuntime = RuntimeInformation.FrameworkDescription;
+var expectedRuntime = Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE_VERSION") ?? "";
+if (candidate && !selectedRuntime.Contains(expectedRuntime, StringComparison.OrdinalIgnoreCase))
+{
+    Console.Error.WriteLine("runtime-selection-mismatch");
+    Environment.Exit(18);
+}
+if (candidate) Console.WriteLine("runtime-selection-confirmed");
+if (candidate && "{{behavior}}" == "runtime-selection-failure") Environment.Exit(17);
+""");
+    }
+
+    public static string FindInstalledRuntimeVersion()
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                ArgumentList = { "--list-runtimes" },
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            }
+        };
+        process.Start();
+        var output = process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+
+        var installed = output
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line => line.StartsWith("Microsoft.NETCore.App ", StringComparison.Ordinal))
+            .Select(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1])
+            .Where(version => !version.StartsWith("8.", StringComparison.Ordinal))
+            .OrderByDescending(version => version.Contains('-', StringComparison.Ordinal))
+            .ThenByDescending(version => ParseRuntimeVersion(version))
+            .ToArray();
+
+        return installed.FirstOrDefault()
+            ?? throw new InvalidOperationException("A non-net8 Microsoft.NETCore.App runtime is required for runtime-preview tests.");
+    }
+
+    private static Version ParseRuntimeVersion(string value)
+    {
+        var core = value.Split('-', 2)[0];
+        return Version.Parse(core);
     }
 
     public static void CreatePackage(string feed, string packageId, string version)

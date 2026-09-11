@@ -51,9 +51,9 @@ compat-radar check --report compat-radar-report.json
 
 The command is explicit: CompatRadar does not infer every dependency worth watching. The watched package must already be referenced by the repository in a `PackageReference` or central `PackageVersion` declaration. The candidate override is applied only to an isolated temporary copy.
 
-## SDK/runtime preview check
+## SDK preview check
 
-Use the same schema with an installed SDK preview. The SDK supplies the runtime used by the validation command:
+Use the same schema with an installed SDK preview:
 
 ```json
 {
@@ -74,14 +74,37 @@ Use the same schema with an installed SDK preview. The SDK supplies the runtime 
 }
 ```
 
-For this channel, each candidate is applied to an isolated `global.json`. The example uses the .NET 11 release-candidate SDK version currently listed by Microsoft; use the exact candidate installed in your environment. The requested SDK must be installed or otherwise available to the local .NET host; the tool does not download SDKs for you. For a runtime-preview watch, use `"kind": "runtime-preview"`; it follows the same isolated `global.json` path and reports a missing preview as `UNSUPPORTED`, not as a future regression.
+For `sdk-preview`, each candidate is applied to an isolated `global.json` by changing only `sdk.version` and enabling preview SDK matching. The requested SDK must be installed or otherwise available to the local .NET host; the tool does not download SDKs for you.
+
+To watch a runtime independently of the SDK, use `runtime-preview` and the exact installed `Microsoft.NETCore.App` runtime identity:
+
+```json
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [
+    {
+      "kind": "runtime-preview",
+      "candidates": ["11.0.0-preview.7.26381.103"]
+    }
+  ],
+  "validation": {
+    "command": "dotnet test -c Release",
+    "workingDirectory": ".",
+    "timeoutSeconds": 900
+  },
+  "policy": { "confirmationRuns": 2 }
+}
+```
+
+For `dotnet build`, `test`, `run`, `pack`, `publish`, and `msbuild` validation commands, CompatRadar passes the candidate-only MSBuild properties `RuntimeFrameworkVersion=<candidate>` and `RollForward=Disable` so the build generates a candidate runtime configuration. A build-disabled command (`--no-build`) is rejected for this channel because it could reuse a stable runtime configuration. For a direct `dotnet <application.dll>` command, it passes the host's `--fx-version <candidate> --roll-forward Disable` options. Candidate attempts also set `DOTNET_ROLL_FORWARD=Disable` and `DOTNET_ROLL_FORWARD_TO_PRERELEASE=1`. The candidate copy keeps the repository's `global.json` unchanged, so SDK selection remains the stable control's selection. The exact runtime must be installed; missing or unsupported runtime selection is `UNSUPPORTED`, and CompatRadar never falls back to another runtime or SDK-selected runtime.
 
 ## Configuration
 
 Schema version `1` has these fields:
 
 - `control.sdk`: must be `current`; this is the stable control in the current execution environment.
-- `watch`: one or more explicit channels. Each channel has `kind`, `candidates`, and an optional `id`. NuGet channels also require `package` and may specify an HTTP(S) `feed` without embedded credentials. Preview channels support `sdk-preview` and `runtime-preview`.
+- `watch`: one or more explicit channels. Each channel has `kind`, `candidates`, and an optional `id`. NuGet channels also require `package` and may specify an HTTP(S) `feed` without embedded credentials. `sdk-preview` candidates are SDK versions selected through isolated `global.json`; `runtime-preview` candidates are exact `Microsoft.NETCore.App` runtime versions selected through the validation command's runtime framework/host options.
 - `validation.command`: an executable plus arguments. Commands are started directly; shell syntax is not evaluated by CompatRadar.
 - `validation.workingDirectory`: a repository-relative directory.
 - `validation.timeoutSeconds`: bounded command timeout from 1 through 86400 seconds.
@@ -154,7 +177,7 @@ Telemetry uses `KeelMatrix.Telemetry` only after the first trustworthy stable-ve
 
 ## Support and limitations
 
-The tool targets `net8.0` and supports Windows, Linux, and macOS operations. Public CI validates the supported Windows, Linux, and macOS operations. The v1 adapters are explicit NuGet prerelease package overrides and SDK/runtime preview selection through `global.json`; the relevant preview must already be installed.
+The tool targets `net8.0` and supports Windows, Linux, and macOS operations. Public CI validates the supported Windows, Linux, and macOS operations, including a real installed runtime-preview selection on each OS. The v1 adapters are explicit NuGet prerelease package overrides, SDK preview selection through isolated `global.json`, and runtime preview selection through an exact candidate-only runtime framework/host override. The relevant SDK/runtime must already be installed.
 
 CompatRadar does not manage dependencies, open update pull requests, discover all dependencies, run hosted builds, provide accounts or scheduling, send notifications, support non-.NET ecosystems, generate patches, or guarantee that every future incompatibility will be predicted.
 
@@ -162,7 +185,7 @@ CompatRadar does not manage dependencies, open update pull requests, discover al
 
 - Configuration errors and invalid paths exit `2`; run `compat-radar config validate --format json` for machine-readable diagnostics.
 - Restore/feed failures are inconclusive. A configured candidate feed is added to the isolated copy's existing NuGet sources; it does not replace the repository's sources. Use environment-based credentials or a credential provider rather than URL credentials.
-- A missing SDK/runtime preview is `UNSUPPORTED`. Install the exact candidate and rerun; CompatRadar never downloads SDKs.
+- A missing SDK/runtime preview is `UNSUPPORTED`. Install the exact SDK or `Microsoft.NETCore.App` candidate and rerun; CompatRadar never downloads SDKs or runtimes and never falls back to a different runtime.
 - A failing stable control is `INCONCLUSIVE_BASELINE_FAILED`. Fix the repository first.
 - Different failure fingerprints across confirmation runs are `INCONCLUSIVE_FLAKY`; inspect the saved report and rerun with a stable test environment.
 - Timeout or process-launch errors are `INCONCLUSIVE_EXECUTION`; increase `timeoutSeconds` only when the command is expected to need it.

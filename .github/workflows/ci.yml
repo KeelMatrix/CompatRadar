@@ -35,6 +35,19 @@ jobs:
         with:
           dotnet-version: 8.0.424
 
+      - name: Set up pinned .NET 11 preview SDK/runtime
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 11.0.100-preview.7.26381.103
+
+      - name: Verify pinned preview runtime is installed
+        shell: pwsh
+        run: |
+          $runtimes = @(dotnet --list-runtimes)
+          if (-not ($runtimes -match '^Microsoft\.NETCore\.App 11\.0\.0-preview\.7\.26381\.103\s')) {
+            throw 'The pinned .NET 11 preview runtime is not visible to the host.'
+          }
+
       - name: Configure macOS temporary directory
         if: runner.os == 'macOS'
         shell: bash

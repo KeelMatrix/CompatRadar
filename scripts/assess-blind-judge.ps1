@@ -66,6 +66,7 @@ foreach ($sample in $samples) {
                 'repositoryRevision',
                 'controlConfiguration',
                 'candidateInputConfiguration',
+                'runtime',
                 'focusedFailingTest',
                 'reproductionCommand',
                 'reproductionConfiguration',

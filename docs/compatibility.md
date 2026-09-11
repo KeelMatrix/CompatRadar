@@ -7,6 +7,7 @@
 - Deprecated fields remain accepted for at least one minor release when practical. They are documented, covered by a deprecation test, and removed only with a schema/version decision.
 - Configuration parsing is fail-closed for unknown or malformed values. Reports are deterministic for equivalent inputs and never contain raw command output or secrets.
 - `FUTURE_REGRESSION` requires a passing stable control and repeated non-zero candidate attempts with the same normalized failure signature and fingerprint. Different non-zero exit codes or diagnostics are `INCONCLUSIVE_FLAKY`.
+- Runtime-preview witnesses record the exact requested runtime in the additive `runtime` field and candidate input configuration. Runtime candidates are selected independently of SDK selection; SDK preview candidates continue to use isolated `global.json` SDK overrides.
 - Every contract change adds a round-trip test and updates the committed synthetic v1 fixtures under `tests/fixtures/v1/`. Golden fixtures are not rewritten silently; changes require a test and changelog explanation.
 - New durable result classifications must define their exit-code behavior and have a reachable engine test. `UNSUPPORTED` means the selected channel cannot be exercised in the current environment and is an exit-code `2` outcome.
 - Release notes must describe user-visible CLI, configuration, report, Action, or packaging changes. Internal refactors need no contract note unless serialized output changes.

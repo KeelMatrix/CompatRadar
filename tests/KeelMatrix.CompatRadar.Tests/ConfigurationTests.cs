@@ -205,6 +205,32 @@ public sealed class ConfigurationTests
     }
 
     [Fact]
+    public void RuntimePreviewRejectsBuildDisabledValidation()
+    {
+        var prepared = RuntimePreviewAdapter.TryPrepare(
+            new ParsedCommand("dotnet", ["test", "--no-build"]),
+            "10.0.12",
+            out _,
+            out var error);
+
+        Assert.False(prepared);
+        Assert.Contains("builds the application", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RuntimePreviewUsesExactHostOverrideForDirectApplications()
+    {
+        var prepared = RuntimePreviewAdapter.TryPrepare(
+            new ParsedCommand("dotnet", ["Fixture.dll", "--fx-version", "8.0.0", "--roll-forward", "Major"]),
+            "10.0.12",
+            out var command,
+            out var error);
+
+        Assert.True(prepared, error);
+        Assert.Equal(["--fx-version", "10.0.12", "--roll-forward", "Disable", "Fixture.dll"], command!.Arguments);
+    }
+
+    [Fact]
     public void CandidateFeedIsAddedToTheIsolatedConfigWithoutReplacingExistingSources()
     {
         var root = TestFixture.CreateRepository("pass");

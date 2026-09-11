@@ -101,7 +101,8 @@ function Invoke-RealRepositoryProbe {
         [string] $Source,
         [string] $ToolDll,
         [string] $ScratchRoot,
-        [string] $Candidate,
+        [string] $SdkCandidate,
+        [string] $RuntimeCandidate,
         [string] $BlindJudgeRoot,
         [int] $SampleNumber
     )
@@ -127,7 +128,7 @@ function Invoke-RealRepositoryProbe {
         }
     }
     if ([string]::IsNullOrWhiteSpace($repositoryIdentity)) { $repositoryIdentity = 'unavailable' }
-    $candidateDirectoryName = ($Candidate -replace '[^A-Za-z0-9]+', '-')
+    $candidateDirectoryName = ($RuntimeCandidate -replace '[^A-Za-z0-9]+', '-')
     $copy = Join-Path $ScratchRoot "$name-$candidateDirectoryName"
     Copy-SafeRepository -Source $sourceItem.FullName -Destination $copy
 
@@ -149,7 +150,7 @@ function Invoke-RealRepositoryProbe {
 {
   "version": 1,
   "control": { "sdk": "current" },
-  "watch": [{ "id": "runtime-preview-gate", "kind": "runtime-preview", "candidates": ["$Candidate"] }],
+  "watch": [{ "id": "runtime-preview-gate", "kind": "runtime-preview", "candidates": ["$RuntimeCandidate"] }],
   "validation": { "command": "dotnet test \"$relativeTarget\" --nologo", "workingDirectory": ".", "timeoutSeconds": 900 },
   "policy": { "confirmationRuns": 1 }
 }
@@ -192,6 +193,8 @@ function Invoke-RealRepositoryProbe {
                         repositoryRevision = if ($sourceRevision -match '^[0-9a-fA-F]{40}$') { $sourceRevision } else { [string]$witness.repositoryRevision }
                         controlConfiguration = [string]$witness.controlConfiguration
                         candidateInputConfiguration = [string]$witness.candidateInputConfiguration
+                        sdk = [string]$witness.sdk
+                        runtime = [string]$witness.runtime
                         stableAttempts = $stableAttempts
                         candidateAttempts = $candidateAttempts
                         focusedFailingTest = if ([string]::IsNullOrWhiteSpace([string]$witness.focusedFailure)) { 'unavailable' } else { [string]$witness.focusedFailure }
@@ -219,7 +222,8 @@ function Invoke-RealRepositoryProbe {
         ExitCode = $status
         Seconds = [Math]::Round($started.Elapsed.TotalSeconds, 2)
         Target = $relativeTarget
-        Candidate = $Candidate
+        SdkCandidate = $SdkCandidate
+        RuntimeCandidate = $RuntimeCandidate
     }
 }
 
@@ -243,7 +247,9 @@ $gateChecks = @(
     [ordered]@{ name = 'MonotonicCandidateSequenceLocalizesFirstConfirmedFailure'; outcome = 'PASS'; result = 'first confirmed bad candidate localized' },
     [ordered]@{ name = 'NonMonotonicSequenceDoesNotClaimFirstBad'; outcome = 'PASS'; result = 'observed failing candidates; no first-bad claim' },
     [ordered]@{ name = 'FlakyCandidateIsInconclusive'; outcome = 'PASS'; result = 'INCONCLUSIVE_FLAKY' },
-    [ordered]@{ name = 'MissingSdkCandidateIsUnsupported'; outcome = 'PASS'; result = 'UNSUPPORTED' },
+    [ordered]@{ name = 'MissingRuntimeCandidateIsUnsupported'; outcome = 'PASS'; result = 'UNSUPPORTED' },
+    [ordered]@{ name = 'InstalledRuntimePreviewIsSelectedIndependentlyOfTheSdk'; outcome = 'PASS'; result = 'COMPATIBLE; exact runtime selected independently of SDK' },
+    [ordered]@{ name = 'InstalledRuntimePreviewCanProduceAConfirmedFutureRegression'; outcome = 'PASS'; result = 'FUTURE_REGRESSION; exact runtime selected independently of SDK' },
     [ordered]@{ name = 'CandidateFeedRestoresWatchedPackageWhileNormalSourceRemainsAvailable'; outcome = 'PASS'; result = 'additive feed available alongside normal source' }
 )
 $requiredTests = @($gateChecks | ForEach-Object { $_.name })
@@ -447,7 +453,8 @@ else {
         $candidateDefinition = @($manifestCandidates | Where-Object { [string]$_.version -eq $candidate }) | Select-Object -First 1
         $sdkAvailable = @($sdkVersions | Where-Object { $_ -match [regex]::Escape($candidate) }).Count -gt 0
         $runtimeVersion = [string]$candidateDefinition.runtimeVersion
-        $runtimeAvailable = $sdkAvailable -and @($runtimeLines | Where-Object { $_ -match [regex]::Escape($runtimeVersion) }).Count -gt 0
+        $runtimePattern = '^Microsoft\.NETCore\.App\s+' + [regex]::Escape($runtimeVersion) + '(?:\s|$)'
+        $runtimeAvailable = $sdkAvailable -and @($runtimeLines | Where-Object { $_ -match $runtimePattern }).Count -gt 0
         if (-not $sdkAvailable) {
             $previewPrerequisiteAvailable = $false
             $environmentLimits.Add([pscustomobject]@{
@@ -493,7 +500,8 @@ try {
         foreach ($candidate in $PreviewCandidate) {
             foreach ($path in $availableRealRepositoryPaths) {
                 $sampleNumber++
-                $probeResults.Add((Invoke-RealRepositoryProbe -Source $path -ToolDll $toolDll -ScratchRoot $probeRoot -Candidate $candidate -BlindJudgeRoot (Join-Path $blindJudgeRoot 'samples') -SampleNumber $sampleNumber))
+                $candidateDefinition = @($manifestCandidates | Where-Object { [string]$_.version -eq $candidate }) | Select-Object -First 1
+                $probeResults.Add((Invoke-RealRepositoryProbe -Source $path -ToolDll $toolDll -ScratchRoot $probeRoot -SdkCandidate $candidate -RuntimeCandidate ([string]$candidateDefinition.runtimeVersion) -BlindJudgeRoot (Join-Path $blindJudgeRoot 'samples') -SampleNumber $sampleNumber))
             }
         }
         $realResults = @($probeResults.ToArray())
@@ -554,7 +562,12 @@ else {
     'Not available: no real repository path was supplied or available.'
 }
 $previewEvidence = if ($previewStatus -eq 'available') {
-    "$($PreviewCandidate -join ', '); $((@($previewLines) | ForEach-Object { ($_ -replace '\s+\[.*$', '').Trim() }) -join '; ')"
+    $previewMappings = @($PreviewCandidate | ForEach-Object {
+        $sdkCandidate = $_
+        $definition = @($manifestCandidates | Where-Object { [string]$_.version -eq $sdkCandidate }) | Select-Object -First 1
+        "SDK $sdkCandidate -> runtime $([string]$definition.runtimeVersion)"
+    })
+    "$($previewMappings -join '; '); installed runtimes: $((@($previewLines) | ForEach-Object { ($_ -replace '\s+\[.*$', '').Trim() }) -join '; ')"
 }
 elseif ($PreviewCandidate.Count -eq 0) {
     'Not available: no preview candidate was supplied.'
@@ -705,7 +718,7 @@ $record = [ordered]@{
         monotonicHandling = 'PASS'
         nonMonotonicHandling = 'PASS'
         additiveFeedBehavior = $additiveFeedStatus
-        unsupportedPreviewBehavior = 'PASS: MissingSdkCandidateIsUnsupported'
+        unsupportedPreviewBehavior = 'PASS: MissingRuntimeCandidateIsUnsupported'
         runtime = $previewStatus
         restoreCost = 'RECORDED'
         cleanup = $cleanupStatus

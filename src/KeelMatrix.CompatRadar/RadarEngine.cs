@@ -169,11 +169,15 @@ internal sealed class RadarEngine
             candidate: null,
             feed: null,
             package: null,
+            runtimeCandidate: null,
             cancellationToken).ConfigureAwait(false);
 
-        CandidateOverrideResult overrideResult = watch.Kind == WatchKind.NuGetPrerelease
-            ? MaterializationScope.ApplyPackageOverride(candidateRoot, watch.Package!, candidate)
-            : MaterializationScope.ApplySdkOverride(candidateRoot, candidate);
+        CandidateOverrideResult overrideResult = watch.Kind switch
+        {
+            WatchKind.NuGetPrerelease => MaterializationScope.ApplyPackageOverride(candidateRoot, watch.Package!, candidate),
+            WatchKind.SdkPreview => MaterializationScope.ApplySdkOverride(candidateRoot, candidate),
+            _ => new CandidateOverrideResult(true, 0, null)
+        };
 
         RunEvidence future;
         bool candidateEvaluated;
@@ -198,10 +202,10 @@ internal sealed class RadarEngine
                 candidate,
                 watch.Feed,
                 watch.Package,
+                watch.Kind == WatchKind.RuntimePreview ? candidate : null,
                 cancellationToken).ConfigureAwait(false);
+            candidateEvaluated = future.CandidateEvaluated;
         }
-
-        var preparedValidationCommand = PrepareValidationCommand(executionValidation.Command!);
 
         var classification = Classify(stable, future, candidateEvaluated);
         var witness = new ReproductionWitness(
@@ -209,12 +213,13 @@ internal sealed class RadarEngine
             revision,
             configurationPath,
             configuration.Validation.WorkingDirectory,
-            preparedValidationCommand.Display,
+            future.Command,
             future.RestoreCommand,
             watch.Package,
             candidate,
             watch.Feed,
-            watch.Kind is WatchKind.SdkPreview or WatchKind.RuntimePreview ? candidate : null,
+            watch.Kind == WatchKind.SdkPreview ? candidate : null,
+            watch.Kind == WatchKind.RuntimePreview ? candidate : null,
             future.Summary,
             future.NormalizedSignature,
             future.Fingerprint,
@@ -278,7 +283,8 @@ internal sealed class RadarEngine
             package = watch.Package,
             candidate,
             feed = watch.Feed,
-            sdk = watch.Kind is WatchKind.SdkPreview or WatchKind.RuntimePreview ? candidate : null
+            sdk = watch.Kind == WatchKind.SdkPreview ? candidate : null,
+            runtime = watch.Kind == WatchKind.RuntimePreview ? candidate : null
         });
     }
 
@@ -290,9 +296,46 @@ internal sealed class RadarEngine
         string? candidate,
         string? feed,
         string? package,
+        string? runtimeCandidate,
         CancellationToken cancellationToken)
     {
-        var command = PrepareValidationCommand(validationCommand);
+        ParsedCommand command;
+        if (runtimeCandidate is not null)
+        {
+            if (!RuntimePreviewAdapter.TryPrepare(validationCommand, runtimeCandidate, out var preparedCommand, out var runtimeError))
+            {
+                return CreateUnsupportedEvidence(
+                    validationCommand,
+                    configuration.Validation.WorkingDirectory,
+                    runtimeError ?? "The runtime-preview adapter could not prepare the validation command.");
+            }
+
+            command = preparedCommand!;
+        }
+        else
+        {
+            command = PrepareValidationCommand(validationCommand);
+        }
+
+        if (runtimeCandidate is not null)
+        {
+            var runtimeAvailability = await ProcessRunner.RunAsync(
+                new ParsedCommand(validationCommand.FileName, ["--list-runtimes"]),
+                workingDirectory,
+                BuildEnvironment(materializedRoot, candidate, attempt: 0, runtimeCandidate),
+                TimeSpan.FromSeconds(Math.Min(configuration.Validation.TimeoutSeconds, 60)),
+                cancellationToken).ConfigureAwait(false);
+            if (runtimeAvailability.ExitCode != 0)
+            {
+                return CreateUnsupportedEvidence(command, configuration.Validation.WorkingDirectory, "The local .NET host could not enumerate installed runtimes.");
+            }
+
+            if (!RuntimePreviewAdapter.IsExactRuntimeInstalled(runtimeAvailability.Stdout, runtimeCandidate))
+            {
+                return CreateUnsupportedEvidence(command, configuration.Validation.WorkingDirectory, "The requested runtime is not installed for the local .NET host.");
+            }
+        }
+
         var attempts = new List<ProcessAttempt>();
         ProcessExecutionResult? restore = null;
         string? restoreCommand = null;
@@ -315,10 +358,10 @@ internal sealed class RadarEngine
             restore = await ProcessRunner.RunAsync(
                 restoreCommandParsed,
                 workingDirectory,
-                BuildEnvironment(materializedRoot, candidate, attempt: 0),
+                BuildEnvironment(materializedRoot, candidate, attempt: 0, runtimeCandidate),
                 TimeSpan.FromSeconds(Math.Min(configuration.Validation.TimeoutSeconds, 900)),
                 cancellationToken).ConfigureAwait(false);
-            if (restore.ExitCode != 0)
+            if (restore!.ExitCode != 0)
             {
                 return new RunEvidence(
                     restore.FailureKind == "unsupported-environment" ? "UNSUPPORTED" : "INCONCLUSIVE_EXECUTION",
@@ -336,9 +379,9 @@ internal sealed class RadarEngine
         for (var attempt = 1; attempt <= configuration.Policy.ConfirmationRuns; attempt++)
         {
             var result = await ProcessRunner.RunAsync(
-                command,
+                command!,
                 workingDirectory,
-                BuildEnvironment(materializedRoot, candidate, attempt),
+                BuildEnvironment(materializedRoot, candidate, attempt, runtimeCandidate),
                 TimeSpan.FromSeconds(configuration.Validation.TimeoutSeconds),
                 cancellationToken).ConfigureAwait(false);
             attempts.Add(ToAttempt(result));
@@ -365,7 +408,7 @@ internal sealed class RadarEngine
         return new RunEvidence(
             classification,
             candidate is not null,
-            command.Display,
+            command!.Display,
             configuration.Validation.WorkingDirectory,
             restoreCommand,
             representative.Summary,
@@ -421,9 +464,9 @@ internal sealed class RadarEngine
         return new ParsedCommand(validationCommand.FileName, arguments);
     }
 
-    private static Dictionary<string, string> BuildEnvironment(string materializedRoot, string? candidate, int attempt)
+    private static Dictionary<string, string> BuildEnvironment(string materializedRoot, string? candidate, int attempt, string? runtimeCandidate)
     {
-        return new Dictionary<string, string>(StringComparer.Ordinal)
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["NUGET_PACKAGES"] = Path.Combine(materializedRoot, ".packages"),
             ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
@@ -433,6 +476,13 @@ internal sealed class RadarEngine
             ["COMPATRADAR_CANDIDATE_VERSION"] = candidate ?? "current",
             ["COMPATRADAR_ATTEMPT"] = attempt.ToString(System.Globalization.CultureInfo.InvariantCulture)
         };
+        if (runtimeCandidate is not null)
+        {
+            environment["DOTNET_ROLL_FORWARD"] = "Disable";
+            environment["DOTNET_ROLL_FORWARD_TO_PRERELEASE"] = "1";
+        }
+
+        return environment;
     }
 
     private static bool IsDotnetCommand(ParsedCommand command)
@@ -445,7 +495,9 @@ internal sealed class RadarEngine
     {
         if (!candidateEvaluated && stable.Classification is "PASS")
         {
-            return ResultClassification.InconclusiveExecution;
+            return future.Classification == "UNSUPPORTED"
+                ? ResultClassification.Unsupported
+                : ResultClassification.InconclusiveExecution;
         }
 
         if (stable.Classification != "PASS")
@@ -549,6 +601,21 @@ internal sealed class RadarEngine
             summary,
             fingerprint,
             [CreateSyntheticAttempt(summary, summary, fingerprint)]);
+    }
+
+    private static RunEvidence CreateUnsupportedEvidence(ParsedCommand command, string workingDirectory, string summary)
+    {
+        var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(summary)))[..16];
+        return new RunEvidence(
+            "UNSUPPORTED",
+            false,
+            command.Display,
+            workingDirectory,
+            null,
+            summary,
+            summary,
+            fingerprint,
+            [new ProcessAttempt(2, false, false, false, "unsupported-environment", summary, summary, fingerprint)]);
     }
 
     private static ProcessAttempt CreateSyntheticAttempt(string summary, string normalizedSignature, string fingerprint)
