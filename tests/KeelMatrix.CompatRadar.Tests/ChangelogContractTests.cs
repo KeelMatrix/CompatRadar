@@ -78,6 +78,25 @@ public sealed class ChangelogContractTests
     }
 
     [Fact]
+    public void VersionMismatchEmitsSingleUnwrappedDiagnostic()
+    {
+        var date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var fixture = CreateFixture($"## 1.2.3 - {date}", "1.2.4", "1.2.4");
+        try
+        {
+            var result = RunContract(fixture.Root, "1.2.3", fixture.Commit, "1.2.4");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("does not match release version", result.Output, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("\n", result.Output.Trim(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(fixture.Root);
+        }
+    }
+
+    [Fact]
     public void InstallExampleVersionMismatchFailsClosed()
     {
         var date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);

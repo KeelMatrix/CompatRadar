@@ -10,8 +10,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Write one unwrapped line to standard error and fail with a non-zero exit code. PowerShell's error
+# formatting wraps redirected text at the host width, which splits contract messages in CI logs.
 function Fail-Contract([string] $Message) {
-    throw "Changelog contract failed: $Message"
+    [Console]::Error.WriteLine("Changelog contract failed: $Message")
+    exit 1
 }
 
 function Normalize-Version([string] $Value, [string] $ParameterName) {
