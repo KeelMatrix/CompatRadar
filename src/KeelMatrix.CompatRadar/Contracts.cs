@@ -106,7 +106,15 @@ internal sealed record ReproductionWitness(
     string? FocusedFailure,
     string NormalizedFailureSignature,
     string Fingerprint,
-    string ReproductionHint);
+    string ReproductionHint)
+{
+    public string ControlConfiguration { get; init; } = string.Empty;
+    public string CandidateInputConfiguration { get; init; } = string.Empty;
+    public IReadOnlyList<ProcessAttempt> StableAttempts { get; init; } = [];
+    public IReadOnlyList<ProcessAttempt> CandidateAttempts { get; init; } = [];
+    public string ReproductionConfiguration { get; init; } = string.Empty;
+    public string RepositoryIdentity { get; init; } = string.Empty;
+};
 
 internal sealed record CandidateComparison(
     string FindingId,

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Separate Phase 0 key for recomputing deterministic planted-breakage detection and equivalent-state false-regression counts.",
+  "countingRule": "candidateCount is the number of known failing candidate states exercised by the named passing regression test; a passing test counts all of its mapped states as detected.",
+  "deterministicPlantedBreakages": [
+    {
+      "id": "reproducible-candidate-failure",
+      "testName": "ReproducibleCandidateFailureIsFutureRegression",
+      "expectedClassification": "FUTURE_REGRESSION",
+      "candidateCount": 1
+    },
+    {
+      "id": "monotonic-confirmed-failures",
+      "testName": "MonotonicCandidateSequenceLocalizesFirstConfirmedFailure",
+      "expectedClassification": "FUTURE_REGRESSION",
+      "candidateCount": 2
+    },
+    {
+      "id": "non-monotonic-observed-failure",
+      "testName": "NonMonotonicSequenceDoesNotClaimFirstBad",
+      "expectedClassification": "FUTURE_REGRESSION",
+      "candidateCount": 1
+    }
+  ],
+  "equivalentStates": [
+    {
+      "id": "stable-and-identical-candidate",
+      "testName": "StableAndIdenticalCandidateAreCompatibleAndDoNotMutateWorktree",
+      "expectedFutureRegressionCount": 0
+    }
+  ]
+}

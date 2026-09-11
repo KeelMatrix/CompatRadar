@@ -35,6 +35,7 @@ internal sealed class RadarEngine
         CancellationToken cancellationToken)
     {
         var revision = MaterializationScope.ComputeRepositoryRevision(repositoryRoot);
+        var repositoryIdentity = MaterializationScope.ComputeRepositoryIdentity(repositoryRoot, revision);
         var executionValidation = ValidateExecution(repositoryRoot, configuration);
         if (!executionValidation.IsValid)
         {
@@ -86,6 +87,7 @@ internal sealed class RadarEngine
                     configuration,
                     configurationPath,
                     revision,
+                    repositoryIdentity,
                     executionValidation,
                     scope,
                     watch,
@@ -143,6 +145,7 @@ internal sealed class RadarEngine
         RadarConfiguration configuration,
         string configurationPath,
         string revision,
+        string repositoryIdentity,
         EngineValidationResult executionValidation,
         MaterializationScope scope,
         WatchConfiguration watch,
@@ -215,8 +218,68 @@ internal sealed class RadarEngine
             future.Summary,
             future.NormalizedSignature,
             future.Fingerprint,
-            $"compat-radar reproduce {findingId}");
+            $"compat-radar reproduce {findingId}")
+        {
+            ControlConfiguration = SerializeControlConfiguration(configuration),
+            CandidateInputConfiguration = SerializeCandidateInputConfiguration(watch, candidate),
+            StableAttempts = stable.Attempts,
+            CandidateAttempts = future.Attempts,
+            ReproductionConfiguration = SerializeReproductionConfiguration(configuration),
+            RepositoryIdentity = repositoryIdentity
+        };
         return new CandidateComparison(findingId, candidate, classification, candidateEvaluated, stable, future, witness);
+    }
+
+    private static string SerializeReproductionConfiguration(RadarConfiguration configuration)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            version = configuration.Version,
+            control = new { sdk = configuration.Control.Sdk },
+            watch = configuration.Watches.Select(watch => new
+            {
+                id = watch.Id,
+                kind = FormatKind(watch.Kind),
+                package = watch.Package,
+                candidates = watch.Candidates,
+                feed = watch.Feed
+            }),
+            validation = new
+            {
+                command = configuration.Validation.Command,
+                workingDirectory = configuration.Validation.WorkingDirectory,
+                timeoutSeconds = configuration.Validation.TimeoutSeconds
+            },
+            policy = new { confirmationRuns = configuration.Policy.ConfirmationRuns }
+        });
+    }
+
+    private static string SerializeControlConfiguration(RadarConfiguration configuration)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            sdk = configuration.Control.Sdk,
+            validation = new
+            {
+                command = configuration.Validation.Command,
+                workingDirectory = configuration.Validation.WorkingDirectory,
+                timeoutSeconds = configuration.Validation.TimeoutSeconds
+            },
+            confirmationRuns = configuration.Policy.ConfirmationRuns
+        });
+    }
+
+    private static string SerializeCandidateInputConfiguration(WatchConfiguration watch, string candidate)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            id = watch.Id,
+            kind = FormatKind(watch.Kind),
+            package = watch.Package,
+            candidate,
+            feed = watch.Feed,
+            sdk = watch.Kind is WatchKind.SdkPreview or WatchKind.RuntimePreview ? candidate : null
+        });
     }
 
     private static async Task<RunEvidence> RunStateAsync(
