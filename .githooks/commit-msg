@@ -43,7 +43,7 @@ done
 label_a=$(printf '\141\147\145\156\164')
 label_m=$(printf '\155\157\144\145\154')
 label_p=$(printf '\160\162\157\155\160\164')
-if LC_ALL=C grep -Eiq "(^|[^[:alnum:]_])(${label_a}|${label_m}|${label_p})[[:space:]]*:" "$message_file"; then
+if LC_ALL=C grep -Eiq "^[[:space:]]*(${label_a}|${label_m}|${label_p})[[:space:]]*:" "$message_file"; then
   printf '%s\n' 'Commit message rejected: internal metadata is not allowed.' >&2
   exit 1
 fi

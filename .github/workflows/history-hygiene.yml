@@ -16,17 +16,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check introduced commits
+      - name: Check all reachable commits
         shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_BEFORE: ${{ github.event.before }}
-          EVENT_SHA: ${{ github.sha }}
-          REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
-          REQUEST_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            sh .githooks/check-history "$REQUEST_BASE" "$REQUEST_HEAD"
-          else
-            sh .githooks/check-history "$EVENT_BEFORE" "$EVENT_SHA"
-          fi
+        run: sh .githooks/check-history
