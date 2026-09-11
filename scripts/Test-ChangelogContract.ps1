@@ -178,7 +178,9 @@ foreach ($declaredVersion in @($versionDeclarations | Select-Object -Unique)) {
 
 $packageReferencePattern = '(?i)(?<![0-9A-Za-z.-])v?(?<version>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?![0-9A-Za-z.-])'
 $packageName = 'KeelMatrix.CompatRadar'
+$multilineInstallPattern = '(?im)\b' + [regex]::Escape($packageName) + '\b[^\r\n]*(?:(?:\\|`)[ \t]*)?\r?\n[ \t]*--version\s+(?<version>v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?![0-9A-Za-z.-])'
 foreach ($file in $allFiles | Where-Object { $_.FullName -ne $changelog }) {
+    $content = [IO.File]::ReadAllText($file.FullName)
     $fileLines = [IO.File]::ReadAllLines($file.FullName)
     foreach ($line in $fileLines) {
         if ($line.IndexOf($packageName, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
@@ -187,6 +189,12 @@ foreach ($file in $allFiles | Where-Object { $_.FullName -ne $changelog }) {
             if ($referencedVersion -ne $releaseVersion) {
                 Fail-Contract "package dependency or install example references '$packageName' at version '$referencedVersion', not '$releaseVersion'."
             }
+        }
+    }
+    foreach ($match in [regex]::Matches($content, $multilineInstallPattern)) {
+        $referencedVersion = $match.Groups['version'].Value
+        if ($referencedVersion -ne $releaseVersion) {
+            Fail-Contract "package dependency or install example references '$packageName' at version '$referencedVersion', not '$releaseVersion'."
         }
     }
 }
