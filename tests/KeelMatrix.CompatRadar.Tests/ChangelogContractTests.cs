@@ -134,6 +134,63 @@ public sealed class ChangelogContractTests
     }
 
     [Fact]
+    public void EqualsInstallExampleVersionMismatchFailsClosed()
+    {
+        var date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var installExample = "# CompatRadar\n\ndotnet tool install --global KeelMatrix.CompatRadar --version=0.2.0\n";
+        var fixture = CreateFixture($"## 0.1.0 - {date}", "0.1.0", installExample: installExample);
+        try
+        {
+            var result = RunContract(fixture.Root, "0.1.0", fixture.Commit, "0.1.0");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("install example", result.Output, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(fixture.Root);
+        }
+    }
+
+    [Fact]
+    public void ContinuationEqualsInstallExampleVersionMismatchFailsClosed()
+    {
+        var date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var installExample = "# CompatRadar\n\ndotnet tool install --global KeelMatrix.CompatRadar \\\n  --version=0.2.0\n";
+        var fixture = CreateFixture($"## 0.1.0 - {date}", "0.1.0", installExample: installExample);
+        try
+        {
+            var result = RunContract(fixture.Root, "0.1.0", fixture.Commit, "0.1.0");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("install example", result.Output, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(fixture.Root);
+        }
+    }
+
+    [Fact]
+    public void EqualsInstallExampleVersionMatchPasses()
+    {
+        var date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var installExample = "# CompatRadar\n\ndotnet tool install --global KeelMatrix.CompatRadar --version=0.1.0\n";
+        var fixture = CreateFixture($"## 0.1.0 - {date}", "0.1.0", installExample: installExample);
+        try
+        {
+            var result = RunContract(fixture.Root, "0.1.0", fixture.Commit, "0.1.0");
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Contains("Changelog contract passed", result.Output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(fixture.Root);
+        }
+    }
+
+    [Fact]
     public void ContractBindsToTheExactCheckedOutCommit()
     {
         var date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);

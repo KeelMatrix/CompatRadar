@@ -181,7 +181,7 @@ foreach ($declaredVersion in @($versionDeclarations | Select-Object -Unique)) {
 
 $packageReferencePattern = '(?i)(?<![0-9A-Za-z.-])v?(?<version>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?![0-9A-Za-z.-])'
 $packageName = 'KeelMatrix.CompatRadar'
-$multilineInstallPattern = '(?im)\b' + [regex]::Escape($packageName) + '\b[^\r\n]*(?:(?:\\|`)[ \t]*)?\r?\n[ \t]*--version\s+(?<version>v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?![0-9A-Za-z.-])'
+$multilineInstallPattern = '(?im)\b' + [regex]::Escape($packageName) + '\b[^\r\n]*(?:(?:\\|`)[ \t]*)?\r?\n[ \t]*--version(?:\s+|=)(?<version>v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?![0-9A-Za-z.-])'
 foreach ($file in $allFiles | Where-Object { $_.FullName -ne $changelog }) {
     $content = [IO.File]::ReadAllText($file.FullName)
     $fileLines = [IO.File]::ReadAllLines($file.FullName)
