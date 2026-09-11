@@ -26,13 +26,32 @@ public sealed class ChangelogContractTests
     public void FinalizedTargetVersionPassesWhenMetadataIsConsistent()
     {
         var date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var fixture = CreateFixture($"## 1.2.3 - {date}", "1.2.3", "1.2.3");
+        var installExample = "# CompatRadar\n\ndotnet tool install --global KeelMatrix.CompatRadar `\n  --version 1.2.3\n";
+        var fixture = CreateFixture($"## 1.2.3 - {date}", "1.2.3", installExample: installExample);
         try
         {
             var result = RunContract(fixture.Root, "1.2.3", fixture.Commit, "1.2.3");
 
             Assert.Equal(0, result.ExitCode);
             Assert.Contains("Changelog contract passed", result.Output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(fixture.Root);
+        }
+    }
+
+    [Fact]
+    public void TargetNestedUnderLevelOneUnreleasedFailsClosed()
+    {
+        var date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var fixture = CreateFixture($"# [Unreleased]\n\n## 1.2.3 - {date}", "1.2.3", "1.2.3");
+        try
+        {
+            var result = RunContract(fixture.Root, "1.2.3", fixture.Commit, "1.2.3");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("inside", result.Output, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -77,6 +96,25 @@ public sealed class ChangelogContractTests
     }
 
     [Fact]
+    public void MultilineInstallExampleVersionMismatchFailsClosed()
+    {
+        var date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var installExample = "# CompatRadar\n\ndotnet tool install --global KeelMatrix.CompatRadar \\\n  --version 1.2.4\n";
+        var fixture = CreateFixture($"## 1.2.3 - {date}", "1.2.3", installExample: installExample);
+        try
+        {
+            var result = RunContract(fixture.Root, "1.2.3", fixture.Commit, "1.2.3");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("install example", result.Output, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(fixture.Root);
+        }
+    }
+
+    [Fact]
     public void ContractBindsToTheExactCheckedOutCommit()
     {
         var date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -94,13 +132,13 @@ public sealed class ChangelogContractTests
         }
     }
 
-    private static ContractFixture CreateFixture(string changelogHeading, string packageVersion, string installVersion)
+    private static ContractFixture CreateFixture(string changelogHeading, string packageVersion, string installVersion = "1.2.3", string? installExample = null)
     {
         var root = Path.Combine(Path.GetTempPath(), "compat-radar-changelog-contract", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         File.WriteAllText(Path.Combine(root, "CHANGELOG.md"), $"# Changelog\n\n{changelogHeading}\n\n- Initial release.\n");
         File.WriteAllText(Path.Combine(root, "Directory.Build.props"), $"<Project><PropertyGroup><CompatRadarReleaseVersion>{packageVersion}</CompatRadarReleaseVersion></PropertyGroup></Project>\n");
-        File.WriteAllText(Path.Combine(root, "README.md"), $"# CompatRadar\n\n`dotnet tool install --global KeelMatrix.CompatRadar --version {installVersion}`\n");
+        File.WriteAllText(Path.Combine(root, "README.md"), installExample ?? $"# CompatRadar\n\n`dotnet tool install --global KeelMatrix.CompatRadar --version {installVersion}`\n");
 
         RunProcess("git", root, "init", "--quiet");
         RunProcess("git", root, "config", "user.name", "KeelMatrix");
