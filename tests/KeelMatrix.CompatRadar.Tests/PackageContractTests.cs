@@ -50,16 +50,17 @@ public sealed class PackageContractTests
         var root = FindRepositoryRoot();
         var packageDirectory = Path.Combine(Path.GetTempPath(), "compat-radar-package-contract", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(packageDirectory);
+        var repositoryCommit = GetRepositoryCommit(root);
         var result = Run(
             "dotnet",
             [
                 "pack",
                 Path.Combine("src", "KeelMatrix.CompatRadar", "KeelMatrix.CompatRadar.csproj"),
                 "-c", "Release",
-                "--no-build",
                 "--no-restore",
                 "--include-symbols",
                 "-p:SymbolPackageFormat=snupkg",
+                $"-p:RepositoryCommit={repositoryCommit}",
                 "--output", packageDirectory
             ],
             root);
@@ -70,6 +71,23 @@ public sealed class PackageContractTests
         }
 
         return packageDirectory;
+    }
+
+    private static string GetRepositoryCommit(string root)
+    {
+        var result = Run("git", ["rev-parse", "HEAD"], root);
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Could not determine the repository commit: {result.Output}");
+        }
+
+        var commit = result.Output.Trim();
+        if (commit.Length != 40 || !commit.All(Uri.IsHexDigit))
+        {
+            throw new InvalidOperationException($"Repository commit was not a full SHA-1: {commit}");
+        }
+
+        return commit;
     }
 
     private static (int ExitCode, string Output) Inspect(string packageDirectory)
