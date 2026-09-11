@@ -206,6 +206,7 @@ public sealed class EngineTests
             Assert.Contains("runtime-selection-confirmed", comparison.CandidateResult.Attempts[0].Summary, StringComparison.Ordinal);
             Assert.Contains($"RuntimeFrameworkVersion={candidate}", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
             Assert.Contains("RollForward=Disable", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
+            Assert.Contains("UseSharedCompilation=false", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
             Assert.Contains($"\"runtime\":\"{candidate}\"", comparison.Witness.CandidateInputConfiguration, StringComparison.Ordinal);
             Assert.Equal(candidate, comparison.Witness.Runtime);
             Assert.Null(comparison.Witness.Sdk);

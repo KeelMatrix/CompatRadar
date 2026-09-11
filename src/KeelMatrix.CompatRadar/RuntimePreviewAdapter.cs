@@ -37,6 +37,7 @@ internal static class RuntimePreviewAdapter
             }
 
             preparedCommand = AddMsBuildRuntimeOverride(validationCommand, runtimeVersion);
+            preparedCommand = AddNoSharedCompilationOverride(preparedCommand);
             return true;
         }
 
@@ -77,6 +78,27 @@ internal static class RuntimePreviewAdapter
         arguments.Insert(1, runtimeVersion);
         arguments.Insert(2, "--roll-forward");
         arguments.Insert(3, "Disable");
+        return new ParsedCommand(command.FileName, arguments);
+    }
+
+    private static ParsedCommand AddNoSharedCompilationOverride(ParsedCommand command)
+    {
+        if (command.Arguments.Any(argument => argument.Equals("-p:UseSharedCompilation=false", StringComparison.OrdinalIgnoreCase)))
+        {
+            return command;
+        }
+
+        var arguments = command.Arguments.ToList();
+        var separatorIndex = arguments.FindIndex(argument => argument == "--");
+        if (separatorIndex >= 0)
+        {
+            arguments.Insert(separatorIndex, "-p:UseSharedCompilation=false");
+        }
+        else
+        {
+            arguments.Add("-p:UseSharedCompilation=false");
+        }
+
         return new ParsedCommand(command.FileName, arguments);
     }
 
