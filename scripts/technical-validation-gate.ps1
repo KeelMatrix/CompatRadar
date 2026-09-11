@@ -4,7 +4,8 @@ param(
     [string[]] $RealRepositoryPath = @(),
     [string[]] $PreviewCandidate = @(),
     [string] $CorpusManifestPath = 'scripts/technical-validation-corpus.json',
-    [string] $BlindJudgeOutputPath = 'artifacts/technical-validation-blind-judge'
+    [string] $BlindJudgeOutputPath = 'artifacts/technical-validation-blind-judge',
+    [string] $GroundTruthKeyPath = 'scripts/technical-validation-ground-truth.json'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,11 +17,52 @@ $feedTestName = 'CandidateFeedRestoresWatchedPackageWhileNormalSourceRemainsAvai
 $additiveFeedStatus = 'NOT_RUN'
 $blindJudgeStatus = 'NOT_RUN'
 $blindJudgeAssessment = $null
+$groundTruthKey = $null
+$groundTruthObserved = $null
+$deterministicTestFailure = $false
+$deterministicFailureEvidence = ''
+$testResultsDirectory = Join-Path ([IO.Path]::GetTempPath()) ('compat-radar-test-results-' + [guid]::NewGuid().ToString('N'))
 
 function Test-ExternalFeedUnavailable {
     param([string] $Output)
 
     return $Output -match '(?i)(NU1301|NU1302|unable to load the service index|unable to get repository signature information|timed out|name resolution|connection refused|network is unreachable|could not resolve host)'
+}
+
+function Convert-RunAttempts {
+    param([object[]] $Attempts)
+
+    $converted = [Collections.Generic.List[object]]::new()
+    $number = 0
+    foreach ($attempt in @($Attempts)) {
+        $number++
+        $converted.Add([ordered]@{
+            attempt = $number
+            exitCode = [int]$attempt.exitCode
+            timedOut = [bool]$attempt.timedOut
+            cancelled = [bool]$attempt.cancelled
+            terminationRequested = [bool]$attempt.terminationRequested
+            failureKind = [string]$attempt.failureKind
+            summary = if ([string]::IsNullOrWhiteSpace([string]$attempt.summary)) { 'no diagnostic observed' } else { [string]$attempt.summary }
+            normalizedFailureSignature = if ([string]::IsNullOrWhiteSpace([string]$attempt.normalizedFailureSignature)) { 'no-failure-observed' } else { [string]$attempt.normalizedFailureSignature }
+            fingerprint = if ([string]::IsNullOrWhiteSpace([string]$attempt.fingerprint)) { 'no-failure-observed' } else { [string]$attempt.fingerprint }
+        })
+    }
+    return $converted.ToArray()
+}
+
+function Read-TestOutcomes {
+    param([string] $ResultsDirectory)
+
+    $outcomes = @{}
+    foreach ($trx in @(Get-ChildItem -LiteralPath $ResultsDirectory -Filter '*.trx' -File -Recurse -ErrorAction SilentlyContinue)) {
+        foreach ($node in @(Select-Xml -LiteralPath $trx.FullName -XPath "//*[local-name()='UnitTestResult']")) {
+            $testName = [string]$node.Node.GetAttribute('testName')
+            $outcome = [string]$node.Node.GetAttribute('outcome')
+            if (-not [string]::IsNullOrWhiteSpace($testName)) { $outcomes[$testName] = $outcome }
+        }
+    }
+    return $outcomes
 }
 
 function Copy-SafeRepository {
@@ -69,6 +111,22 @@ function Invoke-RealRepositoryProbe {
     $name = if ($sourceItem.Name -in @('app', 'src', 'repo')) { $sourceItem.Parent.Name } else { $sourceItem.Name }
     $sourceRevision = (& git -C $sourceItem.FullName rev-parse HEAD 2>$null | Out-String).Trim()
     if ([string]::IsNullOrWhiteSpace($sourceRevision)) { $sourceRevision = 'unavailable' }
+    $repositoryIdentity = (& git -C $sourceItem.FullName config --get remote.origin.url 2>$null | Out-String).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($repositoryIdentity)) {
+        try {
+            $repositoryUri = [Uri]$repositoryIdentity
+            if ($repositoryUri.Scheme -in @('http', 'https', 'ssh')) {
+                $repositoryIdentity = "$($repositoryUri.Scheme)://$($repositoryUri.Host)$($repositoryUri.AbsolutePath)".TrimEnd('/')
+            }
+            elseif ($repositoryIdentity -notmatch '^git@[^:]+:.+') {
+                $repositoryIdentity = 'unavailable'
+            }
+        }
+        catch {
+            if ($repositoryIdentity -notmatch '^git@[^:]+:.+') { $repositoryIdentity = 'unavailable' }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($repositoryIdentity)) { $repositoryIdentity = 'unavailable' }
     $candidateDirectoryName = ($Candidate -replace '[^A-Za-z0-9]+', '-')
     $copy = Join-Path $ScratchRoot "$name-$candidateDirectoryName"
     Copy-SafeRepository -Source $sourceItem.FullName -Destination $copy
@@ -116,14 +174,32 @@ function Invoke-RealRepositoryProbe {
             if (-not [string]::IsNullOrWhiteSpace($BlindJudgeRoot)) {
                 New-Item -ItemType Directory -Force -Path $BlindJudgeRoot | Out-Null
                 $witnesses = @($reportObject.watches | ForEach-Object { $_.comparisons } | ForEach-Object {
-                    $attempt = @($_.candidateResult.attempts) | Select-Object -First 1
+                    $comparison = $_
+                    $witness = $comparison.witness
+                    $reportIdentity = [string]$witness.repositoryIdentity
+                    $reportConfiguration = [string]$witness.reproductionConfiguration
+                    if ([string]::IsNullOrWhiteSpace($reportIdentity) -or [string]::IsNullOrWhiteSpace($reportConfiguration)) {
+                        throw "The report witness for '$($comparison.candidate)' is missing repository identity or reproduction configuration."
+                    }
+                    $candidateAttempts = @(Convert-RunAttempts @($witness.candidateAttempts))
+                    $stableAttempts = @(Convert-RunAttempts @($witness.stableAttempts))
+                    $attempt = $candidateAttempts | Select-Object -First 1
                     [ordered]@{
-                        candidate = [string]$_.candidate
+                        candidate = [string]$comparison.candidate
                         exitCode = if ($null -eq $attempt) { 2 } else { [int]$attempt.exitCode }
-                        summary = [string]$_.candidateResult.summary
-                        normalizedFailureSignature = [string]$_.candidateResult.normalizedSignature
-                        validationCommand = [string]$_.witness.validationCommand
-                        reproductionHint = [string]$_.witness.reproductionHint
+                        summary = if ([string]::IsNullOrWhiteSpace([string]$comparison.candidateResult.summary)) { 'no diagnostic observed' } else { [string]$comparison.candidateResult.summary }
+                        repositoryIdentity = if ([string]::IsNullOrWhiteSpace($repositoryIdentity) -or $repositoryIdentity -eq 'unavailable') { $reportIdentity } else { $repositoryIdentity }
+                        repositoryRevision = if ($sourceRevision -match '^[0-9a-fA-F]{40}$') { $sourceRevision } else { [string]$witness.repositoryRevision }
+                        controlConfiguration = [string]$witness.controlConfiguration
+                        candidateInputConfiguration = [string]$witness.candidateInputConfiguration
+                        stableAttempts = $stableAttempts
+                        candidateAttempts = $candidateAttempts
+                        focusedFailingTest = if ([string]::IsNullOrWhiteSpace([string]$witness.focusedFailure)) { 'unavailable' } else { [string]$witness.focusedFailure }
+                        reproductionCommand = [string]$witness.validationCommand
+                        reproductionConfiguration = $reportConfiguration
+                        normalizedFailureSignature = if ([string]::IsNullOrWhiteSpace([string]$witness.normalizedFailureSignature)) { 'no-failure-observed' } else { [string]$witness.normalizedFailureSignature }
+                        fingerprint = if ([string]::IsNullOrWhiteSpace([string]$witness.fingerprint)) { 'no-failure-observed' } else { [string]$witness.fingerprint }
+                        reproductionHint = [string]$witness.reproductionHint
                     }
                 })
                 $sample = [ordered]@{
@@ -198,6 +274,32 @@ if ($PreviewCandidate.Count -gt 0) {
         throw 'The requested preview candidates must exactly match the pinned Phase 0 candidate corpus.'
     }
 }
+$groundTruthFile = (Resolve-Path -LiteralPath $GroundTruthKeyPath -ErrorAction Stop).Path
+try {
+    $groundTruthKey = Get-Content -LiteralPath $groundTruthFile -Raw | ConvertFrom-Json
+}
+catch {
+    throw "Technical validation ground-truth key is not valid JSON: $groundTruthFile"
+}
+if ($groundTruthKey.schemaVersion -ne 1) { throw 'Technical validation ground-truth key must use schema version 1.' }
+$plantedDefinitions = @($groundTruthKey.deterministicPlantedBreakages)
+$equivalentDefinitions = @($groundTruthKey.equivalentStates)
+if ($plantedDefinitions.Count -eq 0 -or $equivalentDefinitions.Count -eq 0) { throw 'Technical validation ground-truth key must contain planted and equivalent-state cases.' }
+if (@($plantedDefinitions | Where-Object {
+        [string]::IsNullOrWhiteSpace([string]$_.id) -or
+        [string]::IsNullOrWhiteSpace([string]$_.testName) -or
+        [string]$_.expectedClassification -ne 'FUTURE_REGRESSION' -or
+        [int]$_.candidateCount -lt 1
+    }).Count -gt 0) {
+    throw 'Every deterministic planted-breakage key entry must name a test, expect FUTURE_REGRESSION, and include a positive candidate count.'
+}
+if (@($equivalentDefinitions | Where-Object {
+        [string]::IsNullOrWhiteSpace([string]$_.id) -or
+        [string]::IsNullOrWhiteSpace([string]$_.testName) -or
+        [int]$_.expectedFutureRegressionCount -ne 0
+    }).Count -gt 0) {
+    throw 'Every equivalent-state ground-truth entry must name a test and expect zero future regressions.'
+}
 $manifestPathMap = @{}
 foreach ($definition in $repositoryDefinitions) {
     $manifestPathMap[[string]$definition.name] = [string]$definition.path
@@ -231,7 +333,8 @@ foreach ($definition in $repositoryDefinitions) {
 }
 
 $stopwatch.Restart()
-$testOutput = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore 2>&1 | Out-String)
+New-Item -ItemType Directory -Force -Path $testResultsDirectory | Out-Null
+$testOutput = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --logger 'trx;LogFileName=technical-validation.trx' --results-directory $testResultsDirectory 2>&1 | Out-String)
 $testStatus = $LASTEXITCODE
 $testSeconds = $stopwatch.Elapsed.TotalSeconds
 if ($testStatus -ne 0) {
@@ -244,8 +347,49 @@ if ($testStatus -ne 0) {
         })
     }
     else {
-        throw "Technical gate tests failed with exit code $testStatus.`n$testOutput"
+        $deterministicTestFailure = $true
+        $deterministicFailureEvidence = "The deterministic test corpus failed with exit code $testStatus."
     }
+}
+
+$testOutcomes = Read-TestOutcomes -ResultsDirectory $testResultsDirectory
+$observedCases = [Collections.Generic.List[object]]::new()
+foreach ($definition in $plantedDefinitions) {
+    $observedOutcome = @($testOutcomes.Keys | Where-Object { $_ -eq [string]$definition.testName -or $_ -like "*.$([string]$definition.testName)" }) | Select-Object -First 1
+    $result = if ($null -eq $observedOutcome) { 'NOT_RUN' } else { [string]$testOutcomes[$observedOutcome] }
+    $detected = $result -eq 'Passed'
+    if (-not $detected) { $deterministicTestFailure = $true }
+    $observedCases.Add([ordered]@{
+        id = [string]$definition.id
+        testName = [string]$definition.testName
+        expectedClassification = [string]$definition.expectedClassification
+        candidateCount = [int]$definition.candidateCount
+        observedOutcome = $result
+        detected = $detected
+    })
+}
+$observedEquivalentStates = [Collections.Generic.List[object]]::new()
+foreach ($definition in $equivalentDefinitions) {
+    $observedOutcome = @($testOutcomes.Keys | Where-Object { $_ -eq [string]$definition.testName -or $_ -like "*.$([string]$definition.testName)" }) | Select-Object -First 1
+    $result = if ($null -eq $observedOutcome) { 'NOT_RUN' } else { [string]$testOutcomes[$observedOutcome] }
+    $futureRegressionCount = if ($result -eq 'Passed') { 0 } else { 1 }
+    if ($futureRegressionCount -gt 0) { $deterministicTestFailure = $true }
+    $observedEquivalentStates.Add([ordered]@{
+        id = [string]$definition.id
+        testName = [string]$definition.testName
+        expectedFutureRegressionCount = [int]$definition.expectedFutureRegressionCount
+        observedOutcome = $result
+        observedFutureRegressionCount = $futureRegressionCount
+    })
+}
+$groundTruthObserved = [ordered]@{
+    schemaVersion = 1
+    keyPath = $GroundTruthKeyPath
+    deterministicPlantedBreakages = $observedCases.ToArray()
+    equivalentStates = $observedEquivalentStates.ToArray()
+}
+if (Test-Path -LiteralPath $testResultsDirectory) {
+    try { Remove-Item -LiteralPath $testResultsDirectory -Recurse -Force } catch { $environmentLimits.Add([pscustomobject]@{ Kind = 'test-results-cleanup'; Status = 'failed'; Detail = 'The temporary test-result directory could not be removed.' }) }
 }
 
 $stopwatch.Restart()
@@ -267,6 +411,20 @@ elseif (Test-ExternalFeedUnavailable $feedTestOutput) {
 }
 else {
     throw "Technical gate additive-feed integration test failed with exit code $feedTestStatus.`n$feedTestOutput"
+}
+
+foreach ($check in $gateChecks) {
+    $checkName = [string]$check.name
+    if ($checkName -eq $feedTestName) {
+        $check['outcome'] = if ($additiveFeedStatus -eq 'PASS') { 'PASS' } else { 'NOT_RUN' }
+        $check['result'] = if ($additiveFeedStatus -eq 'PASS') { 'additive feed available alongside normal source' } else { "additive-feed status: $additiveFeedStatus" }
+        continue
+    }
+    $matchingTest = @($testOutcomes.Keys | Where-Object { $_ -eq $checkName -or $_ -like "*.$checkName" }) | Select-Object -First 1
+    if ($null -ne $matchingTest -and [string]$testOutcomes[$matchingTest] -ne 'Passed') {
+        $check['outcome'] = 'FAIL'
+        $check['result'] = "test outcome: $([string]$testOutcomes[$matchingTest])"
+    }
 }
 
 $sdkVersions = @()
@@ -406,13 +564,35 @@ else {
 }
 $repositoryRevision = (& git rev-parse HEAD 2>$null | Out-String).Trim()
 if ([string]::IsNullOrWhiteSpace($repositoryRevision)) { $repositoryRevision = 'unavailable' }
-$gateStatus = if ($environmentLimits.Count -eq 0) { 'PASS' } else { 'ENVIRONMENT_LIMITED' }
-$gateExitCode = if ($gateStatus -eq 'PASS') { 0 } else { 2 }
+$plantedBreakagesTotal = 0
+$plantedBreakagesDetected = 0
+foreach ($case in $observedCases) {
+    $plantedBreakagesTotal += [int]$case['candidateCount']
+    if ([bool]$case['detected']) { $plantedBreakagesDetected += [int]$case['candidateCount'] }
+}
+$detectionRatePercent = if ($plantedBreakagesTotal -eq 0) { 0 } else { [Math]::Round(($plantedBreakagesDetected * 100.0) / $plantedBreakagesTotal, 2) }
+$equivalentStateFutureRegressionCount = 0
+foreach ($case in $observedEquivalentStates) { $equivalentStateFutureRegressionCount += [int]$case['observedFutureRegressionCount'] }
+$requiredDetectionRatePercent = 95
+$computedGoGatePasses = -not $deterministicTestFailure -and $detectionRatePercent -ge $requiredDetectionRatePercent -and $equivalentStateFutureRegressionCount -eq 0
+$groundTruthObserved['metrics'] = [ordered]@{
+    plantedBreakagesDetected = $plantedBreakagesDetected
+    plantedBreakagesTotal = $plantedBreakagesTotal
+    detectionRatePercent = $detectionRatePercent
+    requiredDetectionRatePercent = $requiredDetectionRatePercent
+    equivalentStateFutureRegressionCount = $equivalentStateFutureRegressionCount
+    goGatePasses = $computedGoGatePasses
+}
+$gateStatus = if (-not $computedGoGatePasses) { 'FAILED' } elseif ($environmentLimits.Count -eq 0) { 'PASS' } else { 'ENVIRONMENT_LIMITED' }
+$gateExitCode = if ($gateStatus -eq 'PASS') { 0 } elseif ($gateStatus -eq 'ENVIRONMENT_LIMITED') { 2 } else { 1 }
 $environmentLimitEvidence = if ($environmentLimits.Count -eq 0) {
     'None.'
 }
 else {
     ($environmentLimits | ForEach-Object { "$($_.Kind): $($_.Status) - $($_.Detail)" }) -join ' '
+}
+if (-not [string]::IsNullOrWhiteSpace($deterministicFailureEvidence)) {
+    $environmentLimitEvidence = "$deterministicFailureEvidence $environmentLimitEvidence"
 }
 $directory = Split-Path -Parent $OutputPath
 if (-not [string]::IsNullOrWhiteSpace($directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
@@ -429,8 +609,8 @@ Generated by `scripts/technical-validation-gate.ps1` with application and CLI te
 
 ## Deterministic corpus
 
-- Planted deterministic future-breakage scenarios: 6/6 detected (100%, exceeding the >=95% gate).
-- Equivalent stable/future state false `FUTURE_REGRESSION` results: 0.
+- Planted deterministic future-breakage scenarios: __PLANTED_DETECTED__/__PLANTED_TOTAL__ detected (__DETECTION_RATE__%, required >=__REQUIRED_RATE__).
+- Equivalent stable/future state false `FUTURE_REGRESSION` results: __EQUIVALENT_REGRESSIONS__.
 - Additive-feed integration: __FEED_STATUS__ (`CandidateFeedRestoresWatchedPackageWhileNormalSourceRemainsAvailable`) in the Release test suite and named gate check.
 - Stable-control failures: classified `INCONCLUSIVE_BASELINE_FAILED`, including non-deterministic fail-A/fail-B output.
 - Candidate fail-A/fail-B output: classified `INCONCLUSIVE_FLAKY`, never `FUTURE_REGRESSION`.
@@ -450,7 +630,8 @@ __CHECKS__
 - Real repository probes: __REAL__
 - Pinned corpus manifest: `scripts/technical-validation-corpus.json` (six repositories, including three external repositories with distinct complexity profiles).
 - Isolated probe cleanup: __CLEANUP__.
-- Inconclusive rate: 4 of 10 named gate checks (40%) intentionally exercise baseline/flaky ambiguity; the separate unsupported check is also non-success. Every result remains visible in the JSON report.
+- Ground-truth key: `__GROUND_TRUTH__` (retained separately from the unlabeled blind pack; counts are computed from observed test results).
+- Every result remains visible in the JSON report.
 - Runtime and restore cost: measured above for the gate host and per real-repository probe.
 
 ## Report assessment
@@ -467,7 +648,8 @@ pwsh -NoProfile -File scripts/technical-validation-gate.ps1 -OutputPath artifact
 $sdkVersion = (& dotnet --version | Out-String).Trim()
 $checkEvidence = ($gateChecks | ForEach-Object { "- $($_.name): $($_.outcome) — $($_.result)." }) -join "`n"
 $blindEvidence = if ($blindJudgeStatus -eq 'PASS') { "PASS ($($blindJudgeAssessment.sampleCount) unlabeled samples; labels and expected outcomes omitted)." } else { "Not run: $blindJudgeStatus." }
-$evidence = $evidence.Replace('__STATUS__', $gateStatus, [StringComparison]::Ordinal).Replace('__EXIT__', $gateExitCode.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__REVISION__', $repositoryRevision, [StringComparison]::Ordinal).Replace('__LIMITS__', $environmentLimitEvidence, [StringComparison]::Ordinal).Replace('__FEED_STATUS__', $additiveFeedStatus, [StringComparison]::Ordinal).Replace('__CHECKS__', $checkEvidence, [StringComparison]::Ordinal).Replace('__SDK__', $sdkVersion, [StringComparison]::Ordinal).Replace('__RESTORE__', [Math]::Round($restoreSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__BUILD__', [Math]::Round($buildSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__TEST__', [Math]::Round($testSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__FEED__', [Math]::Round($feedTestSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__PREVIEW__', $previewEvidence, [StringComparison]::Ordinal).Replace('__REAL__', $realEvidence, [StringComparison]::Ordinal).Replace('__CLEANUP__', $cleanupStatus, [StringComparison]::Ordinal).Replace('__BLIND__', $blindEvidence, [StringComparison]::Ordinal)
+$groundTruthOutputPath = Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($OutputPath))) 'technical-validation-ground-truth.json'
+$evidence = $evidence.Replace('__STATUS__', $gateStatus, [StringComparison]::Ordinal).Replace('__EXIT__', $gateExitCode.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__REVISION__', $repositoryRevision, [StringComparison]::Ordinal).Replace('__LIMITS__', $environmentLimitEvidence, [StringComparison]::Ordinal).Replace('__FEED_STATUS__', $additiveFeedStatus, [StringComparison]::Ordinal).Replace('__CHECKS__', $checkEvidence, [StringComparison]::Ordinal).Replace('__SDK__', $sdkVersion, [StringComparison]::Ordinal).Replace('__RESTORE__', [Math]::Round($restoreSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__BUILD__', [Math]::Round($buildSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__TEST__', [Math]::Round($testSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__FEED__', [Math]::Round($feedTestSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__PREVIEW__', $previewEvidence, [StringComparison]::Ordinal).Replace('__REAL__', $realEvidence, [StringComparison]::Ordinal).Replace('__CLEANUP__', $cleanupStatus, [StringComparison]::Ordinal).Replace('__BLIND__', $blindEvidence, [StringComparison]::Ordinal).Replace('__PLANTED_DETECTED__', $plantedBreakagesDetected.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__PLANTED_TOTAL__', $plantedBreakagesTotal.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__DETECTION_RATE__', $detectionRatePercent.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__REQUIRED_RATE__', $requiredDetectionRatePercent.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__EQUIVALENT_REGRESSIONS__', $equivalentStateFutureRegressionCount.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__GROUND_TRUTH__', $groundTruthOutputPath, [StringComparison]::Ordinal)
 $evidence | Set-Content -LiteralPath $OutputPath -Encoding utf8
 
 $jsonOutputPath = [IO.Path]::ChangeExtension($OutputPath, '.json')
@@ -482,11 +664,12 @@ $record = [ordered]@{
     exitCode = $gateExitCode
     repositoryRevision = $repositoryRevision
     deterministicCorpus = [ordered]@{
-        plantedBreakagesDetected = 6
-        plantedBreakagesTotal = 6
-        detectionRatePercent = 100
-        requiredDetectionRatePercent = 95
-        equivalentStateFutureRegressionCount = 0
+        plantedBreakagesDetected = $plantedBreakagesDetected
+        plantedBreakagesTotal = $plantedBreakagesTotal
+        detectionRatePercent = $detectionRatePercent
+        requiredDetectionRatePercent = $requiredDetectionRatePercent
+        equivalentStateFutureRegressionCount = $equivalentStateFutureRegressionCount
+        goGatePasses = $computedGoGatePasses
     }
     additiveFeedIntegration = [ordered]@{
         test = $feedTestName
@@ -516,7 +699,7 @@ $record = [ordered]@{
         cleanupStatus = $cleanupStatus
     }
     evidenceCoverage = [ordered]@{
-        deterministicPlantedBreakageDetection = 'PASS: 6/6 (100%)'
+        deterministicPlantedBreakageDetection = "$plantedBreakagesDetected/$plantedBreakagesTotal ($detectionRatePercent%; required >=$requiredDetectionRatePercent%)"
         stableControlConfirmation = 'PASS'
         flakyClassification = 'PASS'
         monotonicHandling = 'PASS'
@@ -534,14 +717,30 @@ $record = [ordered]@{
         outputPath = $BlindJudgeOutputPath
         assessment = $blindJudgeAssessment
     }
+    groundTruth = [ordered]@{
+        keyPath = $GroundTruthKeyPath
+        outputPath = $groundTruthOutputPath
+        observed = $groundTruthObserved
+    }
     environmentLimits = $environmentLimits.ToArray()
 }
 ($record | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $jsonOutputPath -Encoding utf8
+$groundTruthRecord = [ordered]@{
+    schemaVersion = 1
+    keyPath = $GroundTruthKeyPath
+    key = $groundTruthKey
+    observed = $groundTruthObserved
+}
+($groundTruthRecord | ConvertTo-Json -Depth 10) | Set-Content -LiteralPath $groundTruthOutputPath -Encoding utf8
 
 if ($gateStatus -eq 'PASS') {
     Write-Output "Technical validation gate passed; evidence written to $OutputPath and $jsonOutputPath."
 }
+elseif ($gateStatus -eq 'FAILED') {
+    Write-Output "Technical validation gate failed closed; evidence written to $OutputPath, $jsonOutputPath, and $groundTruthOutputPath."
+    exit $gateExitCode
+}
 else {
-    Write-Output "Technical validation gate environment-limited (exit code 2); evidence written to $OutputPath and $jsonOutputPath."
-    exit 2
+    Write-Output "Technical validation gate environment-limited (exit code 2); evidence written to $OutputPath, $jsonOutputPath, and $groundTruthOutputPath."
+    exit $gateExitCode
 }

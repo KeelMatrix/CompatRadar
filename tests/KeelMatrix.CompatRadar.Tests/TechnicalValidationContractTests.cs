@@ -55,6 +55,36 @@ public sealed class TechnicalValidationContractTests
         Assert.Contains("technical-validation-corpus.json", documentation, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void PhaseZeroGroundTruthKeyIsSeparateAndRecomputable()
+    {
+        var root = FindRepositoryRoot();
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "scripts", "technical-validation-ground-truth.json")));
+        var key = document.RootElement;
+
+        Assert.Equal(1, key.GetProperty("schemaVersion").GetInt32());
+        var planted = key.GetProperty("deterministicPlantedBreakages").EnumerateArray().ToArray();
+        Assert.NotEmpty(planted);
+        Assert.All(planted, testCase =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(testCase.GetProperty("id").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(testCase.GetProperty("testName").GetString()));
+            Assert.Equal("FUTURE_REGRESSION", testCase.GetProperty("expectedClassification").GetString());
+            Assert.True(testCase.GetProperty("candidateCount").GetInt32() > 0);
+        });
+        Assert.Equal(4, planted.Sum(testCase => testCase.GetProperty("candidateCount").GetInt32()));
+
+        var equivalent = key.GetProperty("equivalentStates").EnumerateArray().ToArray();
+        Assert.NotEmpty(equivalent);
+        Assert.All(equivalent, testCase => Assert.Equal(0, testCase.GetProperty("expectedFutureRegressionCount").GetInt32()));
+
+        var gate = File.ReadAllText(Path.Combine(root, "scripts", "technical-validation-gate.ps1"));
+        Assert.Contains("Read-TestOutcomes", gate, StringComparison.Ordinal);
+        Assert.DoesNotContain("plantedBreakagesDetected = 6", gate, StringComparison.Ordinal);
+        Assert.DoesNotContain("plantedBreakagesTotal = 6", gate, StringComparison.Ordinal);
+        Assert.DoesNotContain("detectionRatePercent = 100", gate, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

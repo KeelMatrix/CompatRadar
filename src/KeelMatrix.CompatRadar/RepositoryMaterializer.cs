@@ -296,6 +296,63 @@ internal sealed class MaterializationScope : IDisposable
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
+    public static string ComputeRepositoryIdentity(string repository, string revision)
+    {
+        try
+        {
+            var gitDirectory = Path.Combine(repository, ".git");
+            if (Directory.Exists(gitDirectory) || File.Exists(gitDirectory))
+            {
+                using var process = new System.Diagnostics.Process
+                {
+                    StartInfo = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "git",
+                        WorkingDirectory = repository,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    }
+                };
+                process.StartInfo.ArgumentList.Add("config");
+                process.StartInfo.ArgumentList.Add("--get");
+                process.StartInfo.ArgumentList.Add("remote.origin.url");
+                process.Start();
+                var output = process.StandardOutput.ReadToEnd().Trim();
+                process.WaitForExit(5000);
+                if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(output))
+                {
+                    return SanitizeRepositoryIdentity(output, revision);
+                }
+            }
+        }
+        catch
+        {
+            // A local identity remains useful when Git metadata is unavailable.
+        }
+
+        return $"local:{revision}";
+    }
+
+    private static string SanitizeRepositoryIdentity(string value, string revision)
+    {
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && uri.Scheme is "http" or "https" or "ssh")
+        {
+            // Remote URLs can contain credentials or query-string tokens. Keep
+            // the stable scheme/host/path identity without copying those values into a report.
+            return (uri.Scheme + "://" + uri.Host + uri.AbsolutePath).TrimEnd('/');
+        }
+
+        if (value.StartsWith("git@", StringComparison.Ordinal) || value.StartsWith("ssh://", StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        return $"local:{revision}";
+    }
+
     public void Dispose()
     {
         try

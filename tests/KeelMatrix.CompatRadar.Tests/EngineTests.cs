@@ -56,6 +56,13 @@ public sealed class EngineTests
             Assert.Equal("1.1.0", comparison.Witness.Candidate);
             Assert.Contains("-p:UseSharedCompilation=false", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
             Assert.False(string.IsNullOrWhiteSpace(comparison.Witness.Fingerprint));
+            Assert.False(string.IsNullOrWhiteSpace(comparison.Witness.RepositoryIdentity));
+            Assert.False(string.IsNullOrWhiteSpace(comparison.Witness.RepositoryRevision));
+            Assert.False(string.IsNullOrWhiteSpace(comparison.Witness.ControlConfiguration));
+            Assert.False(string.IsNullOrWhiteSpace(comparison.Witness.CandidateInputConfiguration));
+            Assert.Equal(comparison.StableControl.Attempts, comparison.Witness.StableAttempts);
+            Assert.Equal(comparison.CandidateResult.Attempts, comparison.Witness.CandidateAttempts);
+            Assert.Contains("\"version\":1", comparison.Witness.ReproductionConfiguration, StringComparison.Ordinal);
         }
         finally { TestFixture.DeleteRepository(root); }
     }
