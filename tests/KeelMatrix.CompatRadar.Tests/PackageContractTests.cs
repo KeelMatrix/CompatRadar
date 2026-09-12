@@ -57,12 +57,22 @@ public sealed class PackageContractTests
             var result = Inspect(packageDirectory);
 
             Assert.NotEqual(0, result.ExitCode);
+            WriteInspectionDiagnostics("package-readme-link-inspection.txt", packageDirectory, result);
             Assert.Contains("does not resolve to an entry in the package", result.Output, StringComparison.Ordinal);
         }
         finally
         {
             TestFixture.DeleteRepository(packageDirectory);
         }
+    }
+
+    private static void WriteInspectionDiagnostics(string fileName, string packageDirectory, (int ExitCode, string Output) result)
+    {
+        var directory = Path.Combine(FindRepositoryRoot(), "artifacts", "test-results");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            Path.Combine(directory, fileName),
+            $"exit code: {result.ExitCode}{Environment.NewLine}{Environment.NewLine}package directory: {packageDirectory}{Environment.NewLine}{Environment.NewLine}{result.Output}");
     }
 
     /// <summary>
@@ -75,13 +85,13 @@ public sealed class PackageContractTests
         using (var source = ZipFile.OpenRead(packagePath))
         using (var target = ZipFile.Open(staged, ZipArchiveMode.Create))
         {
-            var readme = source.GetEntry("README.md") ?? throw new InvalidOperationException("The packed README is missing.");
+            if (source.GetEntry("README.md") is null) throw new InvalidOperationException("The packed README is missing.");
             foreach (var entry in source.Entries)
             {
                 var created = target.CreateEntry(entry.FullName, CompressionLevel.Optimal);
                 using var input = entry.Open();
                 using var output = created.Open();
-                if (ReferenceEquals(entry, readme))
+                if (string.Equals(entry.FullName, "README.md", StringComparison.Ordinal))
                 {
                     using var reader = new StreamReader(input);
                     using var writer = new StreamWriter(output);
