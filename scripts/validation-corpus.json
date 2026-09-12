@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "purpose": "Pinned repository and candidate corpus used to produce reproducible compatibility evidence and an unlabeled witness pack.",
+  "purpose": "Pinned repository and candidate corpus used to produce reproducible compatibility evidence and witness samples.",
   "repositories": [
     {
       "name": "KeelMatrix.Redaction",
@@ -111,6 +111,12 @@
       "source": "InstalledRuntimePreviewIsSelectedIndependentlyOfTheSdk"
     },
     {
+      "case": "runtime-preview-nested-control",
+      "group": "equivalent",
+      "expectedClassification": "COMPATIBLE",
+      "source": "RuntimePreviewDoesNotLeakSelectionToNestedControlRuntime"
+    },
+    {
       "case": "runtime-preview-incompatible-candidate",
       "group": "incompatible",
       "expectedClassification": "FUTURE_REGRESSION",
@@ -134,7 +140,7 @@
     "runtime",
     "restore-cost",
     "cleanup",
-    "unlabeled-witness-pack",
+    "witness-samples",
     "witness-pack-structural-validation"
   ]
 }

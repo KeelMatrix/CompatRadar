@@ -208,6 +208,87 @@ if (requiredMajor > 0 && current.Major != requiredMajor)
 """);
     }
 
+    public static void WriteRuntimeNestedConfiguration(string root, string candidate, int confirmationRuns = 1)
+    {
+        WriteRuntimeConfiguration(root, "runtime-nested-control", candidate, confirmationRuns);
+
+        var nestedDirectory = Path.Combine(root, "nested");
+        Directory.CreateDirectory(nestedDirectory);
+        var fixtureProjectPath = Path.Combine(root, "Fixture.csproj");
+        var fixtureProject = File.ReadAllText(fixtureProjectPath).Replace("</Project>", """
+  <ItemGroup>
+    <Compile Remove="nested/**/*.cs" />
+  </ItemGroup>
+</Project>
+""", StringComparison.Ordinal);
+        File.WriteAllText(fixtureProjectPath, fixtureProject);
+        var nestedProject = Path.Combine(nestedDirectory, "NestedRuntime.csproj");
+        File.WriteAllText(nestedProject, """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseAppHost>false</UseAppHost>
+    <EnableDefaultItems>false</EnableDefaultItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="../**/*.cs" />
+    <Compile Include="NestedRuntime.cs" />
+  </ItemGroup>
+</Project>
+""");
+        File.WriteAllText(Path.Combine(nestedDirectory, "NestedRuntime.cs"), """
+using System;
+
+Console.WriteLine($"nested-control-runtime-major-{Environment.Version.Major}-minor-{Environment.Version.Minor}");
+if (Environment.Version.Major != 8)
+{
+    Console.Error.WriteLine($"error: nested control app ran on unexpected runtime {Environment.Version}");
+    Environment.Exit(19);
+}
+""");
+
+        var outputDirectory = Path.Combine(root, "nested-runtime");
+        var result = Run("dotnet", ["build", Path.Combine("nested", "NestedRuntime.csproj"), "--configuration", "Release", "--nologo", "--output", outputDirectory], root);
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Nested control runtime fixture could not be built: {result.Output}");
+        }
+
+        File.WriteAllText(Path.Combine(root, "Program.cs"), """
+using System;
+using System.Diagnostics;
+
+var nested = new Process
+{
+    StartInfo = new ProcessStartInfo
+    {
+        FileName = "dotnet",
+        WorkingDirectory = Environment.CurrentDirectory,
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        CreateNoWindow = true
+    }
+};
+nested.StartInfo.ArgumentList.Add("nested-runtime/NestedRuntime.dll");
+nested.Start();
+var standardOutput = nested.StandardOutput.ReadToEndAsync();
+var standardError = nested.StandardError.ReadToEndAsync();
+nested.WaitForExit();
+Task.WaitAll(standardOutput, standardError);
+if (nested.ExitCode != 0)
+{
+    Console.Error.WriteLine(standardError.Result.Trim());
+    Environment.Exit(nested.ExitCode);
+}
+
+Console.WriteLine(standardOutput.Result.Trim());
+""");
+    }
+
     public static void WriteSdkConfiguration(string root, string candidateSdk, int confirmationRuns = 2)
     {
         File.WriteAllText(Path.Combine(root, "compat-radar.json"), $$"""

@@ -45,7 +45,7 @@ public sealed class ValidationCorpusContractTests
         Assert.Contains(expectedOutcomes, outcome => outcome.GetProperty("case").GetString() == "runtime-preview-incompatible-candidate");
 
         var requiredEvidence = manifest.GetProperty("requiredEvidence").EnumerateArray().Select(value => value.GetString()).ToHashSet(StringComparer.Ordinal);
-        foreach (var required in new[] { "incompatible-candidate-detection", "equivalent-state-false-regression-check", "stable-control-confirmation", "flaky-classification", "monotonic-and-non-monotonic-handling", "additive-feed-behavior", "unsupported-preview-behavior", "runtime", "restore-cost", "cleanup", "unlabeled-witness-pack", "witness-pack-structural-validation" })
+        foreach (var required in new[] { "incompatible-candidate-detection", "equivalent-state-false-regression-check", "stable-control-confirmation", "flaky-classification", "monotonic-and-non-monotonic-handling", "additive-feed-behavior", "unsupported-preview-behavior", "runtime", "restore-cost", "cleanup", "witness-samples", "witness-pack-structural-validation" })
         {
             Assert.Contains(required, requiredEvidence);
         }
@@ -65,17 +65,17 @@ public sealed class ValidationCorpusContractTests
         Assert.Contains("Read-ObservedOutcomes", corpus, StringComparison.Ordinal);
         Assert.DoesNotContain("detectionRatePercent = 100", corpus, StringComparison.Ordinal);
         Assert.DoesNotContain("incompatibleStatesDetected = 6", corpus, StringComparison.Ordinal);
-        Assert.Contains("independentReviewRequired", corpus, StringComparison.Ordinal);
+        Assert.Contains("evaluationScope", corpus, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void WitnessPackValidationChecksStructureWithoutClaimingAReviewOutcome()
+    public void WitnessPackValidationChecksStructureOnly()
     {
         var root = FindRepositoryRoot();
         var validator = File.ReadAllText(Path.Combine(root, "scripts", "validate-witness-pack.ps1"));
 
         Assert.Contains("structurallyComplete", validator, StringComparison.Ordinal);
-        Assert.Contains("independentReviewRequired", validator, StringComparison.Ordinal);
+        Assert.Contains("evaluationScope", validator, StringComparison.Ordinal);
         Assert.DoesNotContain("outcome = 'PASS'", validator, StringComparison.Ordinal);
         Assert.DoesNotContain("expectedClassification", validator.Split("$forbiddenProperties")[0], StringComparison.Ordinal);
     }

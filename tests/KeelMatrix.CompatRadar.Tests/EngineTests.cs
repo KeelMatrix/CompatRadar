@@ -18,6 +18,7 @@ public sealed class EngineTests
             Assert.Equal(0, result.Report.ExitCode);
             Assert.Equal(ResultClassification.Compatible, result.Report.Watches[0].Comparisons[0].Classification);
             Assert.Empty(result.Report.Findings);
+            Assert.Null(result.Report.Watches[0].Comparisons[0].Witness.FocusedFailure);
             Assert.Equal(before, TestFixture.HashTree(root));
             ObservedOutcomes.Record("stable-and-identical-candidate", result.Report.Watches[0].Comparisons[0].Classification);
         }
@@ -38,6 +39,7 @@ public sealed class EngineTests
             Assert.Equal(2, result.Report.ExitCode);
             Assert.Equal(ResultClassification.InconclusiveBaselineFailed, comparison.Classification);
             Assert.False(comparison.CandidateEvaluated);
+            Assert.Null(comparison.Witness.FocusedFailure);
             Assert.Equal("NOT_EVALUATED_BASELINE_FAILED", comparison.CandidateResult.Classification);
             var candidateAttempt = Assert.Single(comparison.CandidateResult.Attempts);
             Assert.Equal("not-evaluated", candidateAttempt.FailureKind);
@@ -66,6 +68,7 @@ public sealed class EngineTests
             Assert.Contains("does not contain a definition for", comparison.CandidateResult.NormalizedSignature, StringComparison.Ordinal);
             Assert.All(comparison.CandidateResult.Attempts, attempt =>
                 Assert.Contains("does not contain a definition for", attempt.NormalizedSignature, StringComparison.Ordinal));
+            Assert.Equal(comparison.CandidateResult.Summary, comparison.Witness.FocusedFailure);
             Assert.Contains("-p:UseSharedCompilation=false", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
             Assert.False(string.IsNullOrWhiteSpace(comparison.Witness.Fingerprint));
             Assert.False(string.IsNullOrWhiteSpace(comparison.Witness.RepositoryIdentity));
@@ -259,6 +262,30 @@ public sealed class EngineTests
     }
 
     [Fact]
+    public async Task RuntimePreviewDoesNotLeakSelectionToNestedControlRuntime()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            var candidate = TestFixture.FindInstalledRuntimeVersion();
+            TestFixture.WriteRuntimeNestedConfiguration(root, candidate);
+            var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
+            var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+            var comparison = Assert.Single(result.Report.Watches[0].Comparisons);
+
+            Assert.True(
+                comparison.Classification == ResultClassification.Compatible,
+                ReportJson.Serialize(result.Report));
+            Assert.NotEqual(ResultClassification.FutureRegression, comparison.Classification);
+            Assert.Equal(0, result.Report.ExitCode);
+            Assert.Contains("nested-control-runtime-major-8-", comparison.CandidateResult.Attempts[0].Summary, StringComparison.Ordinal);
+            Assert.Null(comparison.Witness.FocusedFailure);
+            ObservedOutcomes.Record("runtime-preview-nested-control", comparison.Classification);
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
     public async Task NonMonotonicSequenceDoesNotClaimFirstBad()
     {
         var root = TestFixture.CreateRepository("non-monotonic");
@@ -331,10 +358,10 @@ public sealed class EngineTests
         var differing = stable.Keys.Where(key => !string.Equals(stable[key], candidate[key], StringComparison.Ordinal)).ToArray();
         Assert.Equal(["NUGET_PACKAGES"], differing);
 
-        // A runtime-preview candidate changes only the runtime host selection that implements the
-        // watched dimension; no other comparison variable differs.
+        // Runtime selection is carried by the validation command. It is not inherited by child
+        // processes through comparison environment variables.
         var runtimeSpecific = runtime.Keys.Except(stable.Keys, StringComparer.Ordinal).OrderBy(key => key, StringComparer.Ordinal).ToArray();
-        Assert.Equal(["DOTNET_ROLL_FORWARD", "DOTNET_ROLL_FORWARD_TO_PRERELEASE"], runtimeSpecific);
+        Assert.Empty(runtimeSpecific);
     }
 
     [Fact]

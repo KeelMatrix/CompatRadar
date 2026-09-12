@@ -10,8 +10,8 @@ param(
 # Produces reproducible evidence for the pinned validation corpus: it restores and builds the
 # solution, runs the deterministic regression corpus, recomputes detection metrics from the
 # classifications those tests actually observed, probes the pinned repositories with real
-# prerelease candidates when the environment provides them, and writes an unlabeled witness pack
-# for an independent reviewer. The script never asserts an independent review outcome.
+# prerelease candidates when the environment provides them, and writes witness samples that omit
+# outcome labels. Structural validation of those samples does not assign an analysis outcome.
 
 $ErrorActionPreference = 'Stop'
 $env:KEELMATRIX_NO_TELEMETRY = '1'
@@ -203,8 +203,8 @@ function Invoke-RealRepositoryProbe {
                 New-Item -ItemType Directory -Force -Path $WitnessPackRoot | Out-Null
 
                 # The witness pack intentionally omits classifications, expectations, and every
-                # other label so a reviewer can judge attribution and reproduction usefulness
-                # without knowing which outcome was seeded for the sample.
+                # other outcome label, so attribution and reproduction usefulness remain separate
+                # from the classification data used to compute corpus metrics.
                 $witnesses = @($reportObject.watches | ForEach-Object { $_.comparisons } | ForEach-Object {
                     $comparison = $_
                     $witness = $comparison.witness
@@ -276,6 +276,7 @@ $namedChecks = @(
     [ordered]@{ name = 'MissingRuntimeCandidateIsUnsupported'; outcome = 'PASS'; result = 'UNSUPPORTED' },
     [ordered]@{ name = 'InstalledRuntimePreviewIsSelectedIndependentlyOfTheSdk'; outcome = 'PASS'; result = 'COMPATIBLE; exact runtime selected independently of the SDK' },
     [ordered]@{ name = 'InstalledRuntimePreviewCanProduceAConfirmedFutureRegression'; outcome = 'PASS'; result = 'FUTURE_REGRESSION; runtime contract violated by the candidate runtime' },
+    [ordered]@{ name = 'RuntimePreviewDoesNotLeakSelectionToNestedControlRuntime'; outcome = 'PASS'; result = 'COMPATIBLE; nested control runtime remains on its declared runtime' },
     [ordered]@{ name = 'InstalledSdkCandidateCanProduceAConfirmedFutureRegression'; outcome = 'PASS'; result = 'FUTURE_REGRESSION; SDK contract violated by the candidate SDK' },
     [ordered]@{ name = 'WitnessRecordsTheTestedContentIdentityForADirtyWorktree'; outcome = 'PASS'; result = 'witness records the materialized content identity' },
     [ordered]@{ name = 'ComparisonEnvironmentDoesNotDescribeTheWatchedCandidate'; outcome = 'PASS'; result = 'comparison environment carries no candidate signaling' },
@@ -571,7 +572,7 @@ elseif ($configuredPaths.Count -gt 0) {
     $environmentLimits.Add([pscustomobject]@{
         Kind = 'witness-pack'
         Status = 'not-run'
-        Detail = 'The unlabeled witness pack was not generated because the pinned prerelease probe prerequisites were unavailable.'
+        Detail = 'Witness samples were not generated because the pinned prerelease probe prerequisites were unavailable.'
     })
 }
 
@@ -652,9 +653,9 @@ __CHECKS__
 - Isolated probe cleanup: __CLEANUP__.
 - Runtime and restore cost: measured above for this host and per repository probe.
 
-## Reviewer pack
+## Witness samples
 
-The repository probes write an unlabeled witness pack under `__WITNESS_PACK__`. `scripts/validate-witness-pack.ps1` checks only structural completeness and that labels are absent; it does not judge attribution or reproduction usefulness and it does not assert an independent review outcome: __WITNESS__.
+The repository probes write witness samples under `__WITNESS_PACK__`. `scripts/validate-witness-pack.ps1` checks structural completeness and that labels are absent; it does not evaluate attribution or reproduction usefulness and does not read expectation data: __WITNESS__.
 
 ## Reproduction
 
@@ -666,7 +667,7 @@ pwsh -NoProfile -File scripts/validation-corpus.ps1 -OutputPath artifacts/valida
 $sdkVersion = (& dotnet --version | Out-String).Trim()
 $checkEvidence = ($namedChecks | ForEach-Object { "- $($_.name): $($_.outcome) - $($_.result)." }) -join "`n"
 $witnessEvidence = if ($witnessPackStatus -eq 'STRUCTURALLY_COMPLETE') {
-    "structurally complete for $($witnessPackValidation.sampleCount) unlabeled sample(s); outcomes, expectations, and labels are omitted and an independent review is still required."
+    "structurally complete for $($witnessPackValidation.sampleCount) sample(s); outcomes, expectations, and labels are omitted, and attribution/reproduction evaluation is outside this structural check."
 }
 else {
     "Not run: $witnessPackStatus."
@@ -752,7 +753,7 @@ $record = [ordered]@{
         status = $witnessPackStatus
         outputPath = $WitnessPackOutputPath
         structuralValidation = $witnessPackValidation
-        independentReviewRequired = $true
+        evaluationScope = 'structure-only'
     }
     environmentLimits = $environmentLimits.ToArray()
 }

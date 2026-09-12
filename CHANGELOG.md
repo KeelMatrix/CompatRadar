@@ -7,4 +7,5 @@
 - Reproduction witnesses now record the deterministic content identity of the materialized state and whether the working tree was dirty, in addition to the Git revision.
 - Console output claims a first-bad candidate only when the watch actually has a confirmed monotonic boundary; later monotonic failures and non-monotonic failures are labelled as observed failures.
 - Runtime-preview selection now targets the exact installed `Microsoft.NETCore.App` runtime independently of SDK selection through candidate-only runtime framework/host overrides with roll-forward disabled; unavailable runtimes remain `UNSUPPORTED`.
+- Runtime-preview selection no longer uses process-wide environment overrides, so nested .NET validation commands retain their own runtime configuration; passing and unevaluated witnesses leave `focusedFailure` empty.
 - Added package-contract inspection, isolated consumer/Action smoke, compatibility policy, and tag-gated Trusted Publishing workflow.

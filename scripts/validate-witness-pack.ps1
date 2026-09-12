@@ -6,15 +6,15 @@ param(
     [string] $OutputPath
 )
 
-# Structural validation for the unlabeled witness pack.
+# Structural validation for generated witness samples.
 #
-# This script only proves that every sample parses, carries the fields a reviewer needs, and
-# exposes no outcome labels. It does not judge attribution or reproduction usefulness, does not
-# read any expectation data, and never claims a review outcome: the reviewer owns that judgment.
+# This script proves that every sample parses, carries the required evidence, and exposes no
+# outcome labels. It does not evaluate attribution or reproduction usefulness and does not read
+# expectation data.
 
 $ErrorActionPreference = 'Stop'
 $samples = @(Get-ChildItem -LiteralPath $PackPath -Filter 'sample-*.json' -File | Sort-Object Name)
-if ($samples.Count -eq 0) { throw 'Witness pack contains no unlabeled samples.' }
+if ($samples.Count -eq 0) { throw 'Witness pack contains no samples.' }
 
 $forbiddenProperties = @('planted', 'expected', 'expectedClassification', 'classification', 'stableControl', 'candidateResult', 'baseline', 'groundTruth', 'outcome', 'verdict', 'result')
 
@@ -101,7 +101,7 @@ $structure = [ordered]@{
     sampleCount = $samples.Count
     witnessCount = $witnessCount
     labelsOmitted = $true
-    independentReviewRequired = $true
+    evaluationScope = 'structure-only'
     checks = [ordered]@{
         samplesParse = $true
         witnessCompleteness = $true
@@ -111,7 +111,7 @@ $structure = [ordered]@{
         perAttemptEvidencePresent = $true
         outcomeLabelsAbsent = $true
     }
-    note = 'Structural completeness only. Attribution and reproduction usefulness require an independent reviewer and are not asserted here.'
+    note = 'Structural completeness only. Attribution and reproduction usefulness are not evaluated here.'
 }
 ($structure | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $OutputPath -Encoding utf8
-Write-Output "Witness pack is structurally complete: $($samples.Count) unlabeled sample(s), $witnessCount witness(es). Independent review is still required."
+Write-Output "Witness pack is structurally complete: $($samples.Count) sample(s), $witnessCount witness(es). Attribution and reproduction usefulness are outside this check."

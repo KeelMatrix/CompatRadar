@@ -226,7 +226,7 @@ internal sealed class RadarEngine
             watch.Feed,
             watch.Kind == WatchKind.SdkPreview ? candidate : null,
             watch.Kind == WatchKind.RuntimePreview ? candidate : null,
-            future.Summary,
+            FindFocusedFailure(future),
             future.NormalizedSignature,
             future.Fingerprint,
             $"compat-radar reproduce {findingId}")
@@ -476,8 +476,8 @@ internal sealed class RadarEngine
     /// Builds the comparison environment for one materialized repository state.
     /// The returned variables never describe which watched candidate is under test, so a
     /// validation command cannot observe the comparison through signaling variables. The only
-    /// state-dependent entries are the isolated per-copy package path and, for runtime-preview
-    /// comparisons, the runtime host selection that implements the watched dimension itself.
+    /// state-dependent entry is the isolated per-copy package path. Runtime-preview selection is
+    /// carried by the prepared validation command so child processes retain their own selection.
     /// </summary>
     internal static Dictionary<string, string?> BuildComparisonEnvironment(string materializedRoot, string? runtimeCandidate)
     {
@@ -500,12 +500,6 @@ internal sealed class RadarEngine
             // MSBuild) would override the SDK/build tools that the watched state selects. A
             // comparison must resolve them from the materialized state and its global.json.
             environment[pinned] = null;
-        }
-
-        if (runtimeCandidate is not null)
-        {
-            environment["DOTNET_ROLL_FORWARD"] = "Disable";
-            environment["DOTNET_ROLL_FORWARD_TO_PRERELEASE"] = "1";
         }
 
         return environment;
@@ -612,6 +606,14 @@ internal sealed class RadarEngine
     private static ProcessAttempt ToAttempt(ProcessExecutionResult result)
     {
         return new ProcessAttempt(result.ExitCode, result.TimedOut, result.Cancelled, result.TerminationRequested, result.FailureKind, result.Summary, result.NormalizedSignature, result.Fingerprint);
+    }
+
+    private static string? FindFocusedFailure(RunEvidence evidence)
+    {
+        return evidence.Attempts
+            .FirstOrDefault(attempt => attempt.ExitCode != 0
+                && !string.Equals(attempt.FailureKind, "not-evaluated", StringComparison.Ordinal))
+            ?.Summary;
     }
 
     private static RunEvidence CreateNotEvaluatedEvidence(ParsedCommand command, string workingDirectory, string summary)
