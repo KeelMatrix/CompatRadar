@@ -43,6 +43,7 @@ internal static class TestFixture
   <packageSources>
     <clear />
     <add key="fixture" value="{feed.Replace("\\", "/", StringComparison.Ordinal)}" />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
   </packageSources>
 </configuration>
 """);

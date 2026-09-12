@@ -52,19 +52,7 @@ public sealed class PackageContractTests
         try
         {
             var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg");
-            using (var archive = ZipFile.Open(packagePath, ZipArchiveMode.Update))
-            {
-                var readme = archive.GetEntry("README.md") ?? throw new InvalidOperationException("The packed README is missing.");
-                string contents;
-                using (var reader = new StreamReader(readme.Open()))
-                {
-                    contents = reader.ReadToEnd();
-                }
-
-                readme.Delete();
-                using var writer = new StreamWriter(archive.CreateEntry("README.md").Open());
-                writer.Write(contents + Environment.NewLine + "See [compatibility policy](docs/compatibility.md)." + Environment.NewLine);
-            }
+            RewriteReadme(packagePath, "See [compatibility policy](docs/compatibility.md).");
 
             var result = Inspect(packageDirectory);
 
@@ -75,6 +63,41 @@ public sealed class PackageContractTests
         {
             TestFixture.DeleteRepository(packageDirectory);
         }
+    }
+
+    /// <summary>
+    /// Rewrites the packed README by rebuilding the archive, which behaves the same on every
+    /// platform (update-mode archive editing does not).
+    /// </summary>
+    private static void RewriteReadme(string packagePath, string appendedMarkdown)
+    {
+        var staged = packagePath + ".staged";
+        using (var source = ZipFile.OpenRead(packagePath))
+        using (var target = ZipFile.Open(staged, ZipArchiveMode.Create))
+        {
+            var readme = source.GetEntry("README.md") ?? throw new InvalidOperationException("The packed README is missing.");
+            foreach (var entry in source.Entries)
+            {
+                var created = target.CreateEntry(entry.FullName, CompressionLevel.Optimal);
+                using var input = entry.Open();
+                using var output = created.Open();
+                if (ReferenceEquals(entry, readme))
+                {
+                    using var reader = new StreamReader(input);
+                    using var writer = new StreamWriter(output);
+                    writer.Write(reader.ReadToEnd());
+                    writer.Write(Environment.NewLine);
+                    writer.Write(appendedMarkdown);
+                    writer.Write(Environment.NewLine);
+                }
+                else
+                {
+                    input.CopyTo(output);
+                }
+            }
+        }
+
+        File.Move(staged, packagePath, overwrite: true);
     }
 
     private static string PackToTemporaryDirectory()

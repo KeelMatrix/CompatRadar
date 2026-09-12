@@ -59,7 +59,9 @@ public sealed class EngineTests
             var comparison = result.Report.Watches[0].Comparisons[0];
 
             Assert.Equal(1, result.Report.ExitCode);
-            Assert.Equal(ResultClassification.FutureRegression, comparison.Classification);
+            Assert.True(
+                comparison.Classification == ResultClassification.FutureRegression,
+                ReportJson.Serialize(result.Report));
             Assert.Equal("1.1.0", comparison.Witness.Candidate);
             Assert.Contains("does not contain a definition for", comparison.CandidateResult.NormalizedSignature, StringComparison.Ordinal);
             Assert.All(comparison.CandidateResult.Attempts, attempt =>
@@ -302,7 +304,9 @@ public sealed class EngineTests
             var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
             var comparison = Assert.Single(result.Report.Watches[0].Comparisons);
 
-            Assert.Equal(ResultClassification.FutureRegression, comparison.Classification);
+            Assert.True(
+                comparison.Classification == ResultClassification.FutureRegression,
+                ReportJson.Serialize(result.Report));
             Assert.Equal(1, result.Report.ExitCode);
             Assert.Equal(candidate, comparison.Witness.Sdk);
             Assert.Equal(2, comparison.CandidateResult.Attempts.Count);
