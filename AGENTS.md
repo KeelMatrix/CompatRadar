@@ -19,7 +19,7 @@ pwsh -NoProfile -File scripts/security-audit.ps1
 dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build --include-symbols --p:SymbolPackageFormat=snupkg --output artifacts/packages
 pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.0
 pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
-pwsh -NoProfile -File scripts/technical-validation-gate.ps1 -PreviewCandidate '11.0.100-preview.7.26381.103' -RealRepositoryPath $PWD
+pwsh -NoProfile -File scripts/validation-corpus.ps1 -PreviewCandidate '11.0.100-preview.7.26381.103' -RealRepositoryPath $PWD
 ```
 
 Run the tool from source:
@@ -36,14 +36,20 @@ dotnet run --project src/KeelMatrix.CompatRadar -- check --format json
 - Stable control always runs before a future regression can be reported.
 - Candidate failures that are not reproducible are inconclusive, never silently compatible.
 - Comparisons use isolated temporary copies. The caller's active worktree is never modified by analysis.
+- The comparison environment never tells the validation command which candidate is under test, and it
+  clears inherited MSBuild SDK/tool-path pinning and node reuse so stable and candidate states cannot
+  share build state or silently resolve a different SDK.
 - Reparse points and symbolic links are not followed while materializing a repository.
-- Reports use repository-relative paths and sanitized bounded diagnostics.
+- Reports use repository-relative paths and sanitized bounded diagnostics, and each witness records the
+  deterministic content identity of the materialized state plus whether the working tree was dirty.
 - Telemetry is best-effort and runs only after a trustworthy completed comparison; `KEELMATRIX_NO_TELEMETRY=1` suppresses it.
 - `.github/workflows/ci.yml` validates the Windows, Linux, and macOS matrix; `release.yml` is tag-gated and inert until an approved release action.
 
 ## Validation strategy
 
 Start with the matching test class, then run the test project, Release build, format verification, package inspection, and isolated package-consumer smoke. Record cross-platform or network checks that cannot run locally rather than inferring their results.
+
+The pinned validation corpus and its reviewer pack are documented in `docs/validation-corpus.md`.
 
 ## Release preparation
 

@@ -147,6 +147,8 @@ compat-radar reproduce package-watch-9.0.0-rc.2 --report compat-radar-report.jso
 
 `reproduce` reads a prior local report and emits the recorded witness/configuration. It does not rerun the repository command.
 
+The witness also records a deterministic `repositoryContentHash` over exactly the content that was materialized, plus whether the working tree contained uncommitted changes. A commit hash alone cannot describe a comparison that ran against modified or untracked files, so the content hash is what identifies the tested state when the working tree is dirty.
+
 ## JSON reports and artifacts
 
 Use `--format json` for CI and `--report <path>` to write an artifact explicitly. Reports are schema-versioned and deterministic for equivalent inputs. They contain sanitized bounded diagnostics, repository-relative configuration paths, and no raw stdout/stderr. Keep reports as short-lived CI artifacts when they may contain project-specific failure summaries; CompatRadar has no hosted report service and does not upload them.
@@ -173,6 +175,8 @@ The wrapper invokes the same `compat-radar check` command, appends the report to
 
 CompatRadar executes the configured repository restore/build/test command and is not a sandbox. Run it only in a trusted local or CI environment. Comparisons use safe temporary directories, do not follow reparse points, do not mutate the active worktree, bound process time and captured output, terminate process trees after timeout/cancellation, reject malformed candidate definitions and wrong-typed optional fields, and sanitize diagnostics. Optional feed URLs with credential-bearing user-info or query parameters are rejected; URL-embedded secrets are unsupported. Use environment-based authentication or a NuGet credential provider for private feeds. Accepted feed URLs and captured diagnostics are never printed with credential values.
 
+Each comparison environment is built deliberately. CompatRadar never sets a variable that tells the validation command which candidate is under test, and it clears inherited MSBuild SDK/tool-path pinning plus MSBuild node reuse so stable and candidate states cannot share build state or silently resolve a different SDK than the one the watched state selects. The only state-dependent entries are the isolated package path and, for `runtime-preview`, the runtime host selection that implements the watched dimension.
+
 Telemetry uses `KeelMatrix.Telemetry` only after the first trustworthy stable-versus-future comparison. It is best-effort, pseudonymous, and at most weekly. It never receives package choices, versions, repository names, paths, commands, test names, logs, source, environment variables, secrets, URLs, or reports. Set `KEELMATRIX_NO_TELEMETRY=1` to opt out. Local KeelMatrix development and CI should set that variable.
 
 ## Support and limitations
@@ -193,7 +197,9 @@ CompatRadar does not manage dependencies, open update pull requests, discover al
 
 ## Compatibility policy
 
-The durable configuration and report contracts are documented in [docs/compatibility.md](docs/compatibility.md). Security and privacy details are in [SECURITY.md](SECURITY.md) and [PRIVACY.md](PRIVACY.md).
+The durable configuration and report contracts are documented in [docs/compatibility.md](https://github.com/KeelMatrix/CompatRadar/blob/main/docs/compatibility.md). Security and privacy details are in [SECURITY.md](https://github.com/KeelMatrix/CompatRadar/blob/main/SECURITY.md) and [PRIVACY.md](https://github.com/KeelMatrix/CompatRadar/blob/main/PRIVACY.md).
+
+Repository development and evidence commands, including the pinned validation corpus, are documented in [docs/validation-corpus.md](https://github.com/KeelMatrix/CompatRadar/blob/main/docs/validation-corpus.md).
 
 ## How this differs from dependency bots
 

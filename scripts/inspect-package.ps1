@@ -79,6 +79,26 @@ function Assert-ExactArchiveEntries($archive, [string] $packageKind) {
     }
 }
 
+function Assert-PackageReadmeLinks {
+    param($archive)
+
+    # The packed README is rendered on NuGet.org, where repository-relative links do not resolve.
+    # Every link must either be absolute or point at an entry that is actually packed.
+    $readme = Get-EntryText $archive 'README.md'
+    foreach ($match in [regex]::Matches($readme, '\[[^\]]*\]\(\s*(?<target>[^)\s]+)(?:\s+"[^"]*")?\s*\)')) {
+        $target = $match.Groups['target'].Value.Trim()
+        if ($target.Length -eq 0 -or $target.StartsWith('#')) { continue }
+        if ($target -match '(?i)^(https?|mailto):') { continue }
+        $relative = ($target -split '#')[0]
+        $normalized = $relative.TrimStart('.', '/').Replace('\', '/')
+        if ($normalized.Length -eq 0) { continue }
+        $resolved = @($archive.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq $normalized })
+        if ($resolved.Count -eq 0) {
+            throw "Package README link '$target' does not resolve to an entry in the package. Use an absolute URL for content that is not packed."
+        }
+    }
+}
+
 $nupkgPath = Join-Path $directory "$id.$ExpectedVersion.nupkg"
 $symbolPath = Join-Path $directory "$id.$ExpectedVersion.snupkg"
 $nupkg = [IO.Compression.ZipFile]::OpenRead($nupkgPath)
@@ -108,6 +128,7 @@ try {
     foreach ($required in @('README.md', 'LICENSE', 'icon.png')) {
         if ($null -eq $nupkg.GetEntry($required)) { throw "Required package entry '$required' is missing." }
     }
+    Assert-PackageReadmeLinks $nupkg
     $icon = Get-IconDimensions $nupkg
     if ($icon[0] -ne 512 -or $icon[1] -ne 512) { throw "Icon dimensions $($icon[0])x$($icon[1]) do not match the 512x512 package contract." }
     if ($nupkg.GetEntry('icon.png').Length -gt 204800) { throw 'icon.png exceeds the 200 KB package limit.' }

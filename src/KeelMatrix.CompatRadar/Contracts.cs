@@ -115,6 +115,8 @@ internal sealed record ReproductionWitness(
     public IReadOnlyList<ProcessAttempt> CandidateAttempts { get; init; } = [];
     public string ReproductionConfiguration { get; init; } = string.Empty;
     public string RepositoryIdentity { get; init; } = string.Empty;
+    public string RepositoryContentHash { get; init; } = string.Empty;
+    public bool RepositoryWorktreeDirty { get; init; }
 };
 
 internal sealed record CandidateComparison(

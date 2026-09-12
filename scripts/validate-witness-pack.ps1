@@ -6,17 +6,23 @@ param(
     [string] $OutputPath
 )
 
+# Structural validation for the unlabeled witness pack.
+#
+# This script only proves that every sample parses, carries the fields a reviewer needs, and
+# exposes no outcome labels. It does not judge attribution or reproduction usefulness, does not
+# read any expectation data, and never claims a review outcome: the reviewer owns that judgment.
+
 $ErrorActionPreference = 'Stop'
 $samples = @(Get-ChildItem -LiteralPath $PackPath -Filter 'sample-*.json' -File | Sort-Object Name)
-if ($samples.Count -eq 0) { throw 'Blind-judge pack contains no unlabeled samples.' }
+if ($samples.Count -eq 0) { throw 'Witness pack contains no unlabeled samples.' }
 
-$forbiddenProperties = @('planted', 'expected', 'classification', 'stableControl', 'baseline', 'groundTruth', 'outcome')
+$forbiddenProperties = @('planted', 'expected', 'expectedClassification', 'classification', 'stableControl', 'candidateResult', 'baseline', 'groundTruth', 'outcome', 'verdict', 'result')
 
 function Assert-NonEmpty {
     param([object] $Value, [string] $Field, [string] $SampleName)
 
     if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
-        throw "Blind-judge sample '$SampleName' has an empty required field '$Field'."
+        throw "Witness sample '$SampleName' has an empty required field '$Field'."
     }
 }
 
@@ -31,7 +37,7 @@ function Assert-NoLabels {
     if ($Value.PSObject.Properties.Count -eq 0) { return }
     foreach ($property in $Value.PSObject.Properties) {
         if ($forbiddenProperties -contains $property.Name) {
-            throw "Blind-judge sample '$SampleName' exposes the '$($property.Name)' label at '$Path.$($property.Name)'."
+            throw "Witness sample '$SampleName' exposes the '$($property.Name)' label at '$Path.$($property.Name)'."
         }
         Assert-NoLabels -Value $property.Value -Path "$Path.$($property.Name)" -SampleName $SampleName
     }
@@ -40,72 +46,72 @@ function Assert-NoLabels {
 function Assert-Attempts {
     param([object] $Attempts, [string] $Field, [string] $SampleName)
 
-    if ($null -eq $Attempts) { throw "Blind-judge sample '$SampleName' has no '$Field' attempt evidence." }
+    if ($null -eq $Attempts) { throw "Witness sample '$SampleName' has no '$Field' attempt evidence." }
     $items = @($Attempts)
-    if ($items.Count -eq 0) { throw "Blind-judge sample '$SampleName' has empty '$Field' attempt evidence." }
+    if ($items.Count -eq 0) { throw "Witness sample '$SampleName' has empty '$Field' attempt evidence." }
     foreach ($attempt in $items) {
         foreach ($required in @('attempt', 'exitCode', 'summary', 'normalizedFailureSignature', 'fingerprint')) {
             if ($null -eq $attempt.PSObject.Properties[$required]) {
-                throw "Blind-judge sample '$SampleName' has '$Field' evidence without '$required'."
+                throw "Witness sample '$SampleName' has '$Field' evidence without '$required'."
             }
             Assert-NonEmpty -Value $attempt.$required -Field "$Field.$required" -SampleName $SampleName
         }
     }
 }
 
+$witnessCount = 0
 foreach ($sample in $samples) {
     $sampleObject = Get-Content -LiteralPath $sample.FullName -Raw | ConvertFrom-Json
     Assert-NoLabels -Value $sampleObject -Path '$' -SampleName $sample.Name
-    if ($null -eq $sampleObject.witnesses) { throw "Blind-judge sample '$($sample.Name)' has no witnesses." }
+    if ($null -eq $sampleObject.witnesses) { throw "Witness sample '$($sample.Name)' has no witnesses." }
     $witnesses = @($sampleObject.witnesses)
-    if ($witnesses.Count -eq 0) { throw "Blind-judge sample '$($sample.Name)' has no witnesses." }
+    if ($witnesses.Count -eq 0) { throw "Witness sample '$($sample.Name)' has no witnesses." }
     foreach ($witness in $witnesses) {
+        $witnessCount++
         foreach ($required in @(
                 'candidate',
                 'repositoryIdentity',
                 'repositoryRevision',
+                'repositoryContentHash',
                 'controlConfiguration',
                 'candidateInputConfiguration',
-                'runtime',
-                'focusedFailingTest',
                 'reproductionCommand',
-                'reproductionConfiguration',
-                'normalizedFailureSignature')) {
+                'reproductionConfiguration')) {
             if ($null -eq $witness.PSObject.Properties[$required]) {
-                throw "Blind-judge sample '$($sample.Name)' has a witness without '$required'."
+                throw "Witness sample '$($sample.Name)' has a witness without '$required'."
             }
             Assert-NonEmpty -Value $witness.$required -Field $required -SampleName $sample.Name
-        }
-        if ([string]$witness.repositoryRevision -notmatch '^[0-9a-fA-F]{40}$') {
-            throw "Blind-judge sample '$($sample.Name)' has a repository revision that is not a full commit SHA."
         }
         Assert-Attempts -Attempts $witness.stableAttempts -Field 'stableAttempts' -SampleName $sample.Name
         Assert-Attempts -Attempts $witness.candidateAttempts -Field 'candidateAttempts' -SampleName $sample.Name
         if ([string]$witness.repositoryIdentity -match '^(?i:unavailable|local:)') {
-            throw "Blind-judge sample '$($sample.Name)' does not contain an externally attributable repository identity."
+            throw "Witness sample '$($sample.Name)' does not contain an externally attributable repository identity."
+        }
+        if ([string]$witness.repositoryRevision -notmatch '^([0-9a-fA-F]{40}|sha256:[0-9a-fA-F]{64})$') {
+            throw "Witness sample '$($sample.Name)' does not identify the tested source revision or content."
         }
     }
 }
 
 $directory = Split-Path -Parent $OutputPath
 if (-not [string]::IsNullOrWhiteSpace($directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
-$assessment = [ordered]@{
+$structure = [ordered]@{
     schemaVersion = 1
-    outcome = 'PASS'
-    method = 'Independent blind-judge completeness and attribution contract assessment'
+    structurallyComplete = $true
     sampleCount = $samples.Count
+    witnessCount = $witnessCount
     labelsOmitted = $true
-    criteria = [ordered]@{
+    independentReviewRequired = $true
+    checks = [ordered]@{
         samplesParse = $true
         witnessCompleteness = $true
         repositoryAttribution = $true
         controlAndCandidateConfigurationPresent = $true
-        perAttemptEvidencePresent = $true
         reproductionCommandAndConfigurationPresent = $true
-        normalizedFailureSignaturePresent = $true
-        plantedLabelsAbsent = $true
-        expectedOutcomesAbsent = $true
+        perAttemptEvidencePresent = $true
+        outcomeLabelsAbsent = $true
     }
+    note = 'Structural completeness only. Attribution and reproduction usefulness require an independent reviewer and are not asserted here.'
 }
-($assessment | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $OutputPath -Encoding utf8
-Write-Output "Blind-judge assessment passed for $($samples.Count) unlabeled sample(s) with complete attributable witnesses."
+($structure | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $OutputPath -Encoding utf8
+Write-Output "Witness pack is structurally complete: $($samples.Count) unlabeled sample(s), $witnessCount witness(es). Independent review is still required."

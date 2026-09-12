@@ -199,6 +199,11 @@ internal static class RadarApplication
         {
             await output.WriteLineAsync($"Reproduction for {finding.FindingId}").ConfigureAwait(false);
             await output.WriteLineAsync($"Repository revision: {finding.Witness.RepositoryRevision}").ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(finding.Witness.RepositoryContentHash))
+            {
+                await output.WriteLineAsync($"Repository content: {finding.Witness.RepositoryContentHash}{(finding.Witness.RepositoryWorktreeDirty ? " (working tree had uncommitted changes)" : string.Empty)}").ConfigureAwait(false);
+            }
+
             await output.WriteLineAsync($"Validation: {finding.Witness.ValidationCommand}").ConfigureAwait(false);
             if (finding.Witness.RestoreCommand is not null) await output.WriteLineAsync($"Restore: {finding.Witness.RestoreCommand}").ConfigureAwait(false);
             await output.WriteLineAsync($"Candidate: {finding.Witness.Candidate}").ConfigureAwait(false);
@@ -234,29 +239,52 @@ internal static class RadarApplication
         output.WriteLine($"Confirmed future regressions: {regressionCount}");
         output.WriteLine($"Inconclusive/flaky: {inconclusiveCount}");
 
-        foreach (var finding in report.Findings)
+        foreach (var watch in report.Watches)
         {
-            output.WriteLine();
-            if (finding.Classification == ResultClassification.FutureRegression)
+            foreach (var finding in watch.Comparisons)
             {
-                output.WriteLine("Future compatibility regression");
-                output.WriteLine("Control:");
-                output.WriteLine("  current stable");
-                output.WriteLine("  PASS");
-                output.WriteLine("Candidate:");
-                var candidateKind = finding.Witness.Package
-                    ?? (finding.Witness.Runtime is not null ? "runtime" : "SDK");
-                output.WriteLine($"  {candidateKind} {finding.Candidate}");
-                output.WriteLine("  FAIL");
-                output.WriteLine($"First confirmed bad candidate: {finding.Candidate}");
-                output.WriteLine($"Failure: {finding.CandidateResult.Summary}");
-                output.WriteLine($"Normalized signature: {finding.CandidateResult.NormalizedSignature}");
-                output.WriteLine($"Reproduce: compat-radar reproduce {finding.FindingId}");
-            }
-            else
-            {
-                output.WriteLine($"{finding.Classification}: {finding.Candidate}");
-                output.WriteLine($"  {finding.CandidateResult.Summary}");
+                if (finding.Classification == ResultClassification.Compatible)
+                {
+                    continue;
+                }
+
+                output.WriteLine();
+                if (finding.Classification == ResultClassification.FutureRegression)
+                {
+                    output.WriteLine("Future compatibility regression");
+                    output.WriteLine("Control:");
+                    output.WriteLine("  current stable");
+                    output.WriteLine("  PASS");
+                    output.WriteLine("Candidate:");
+                    var candidateKind = finding.Witness.Package
+                        ?? (finding.Witness.Runtime is not null ? "runtime" : "SDK");
+                    output.WriteLine($"  {candidateKind} {finding.Candidate}");
+                    output.WriteLine("  FAIL");
+                    var isConfirmedFirstBad = watch.FirstConfirmedBadCandidate is not null
+                        && string.Equals(watch.FirstConfirmedBadCandidate, finding.Candidate, StringComparison.Ordinal);
+                    if (isConfirmedFirstBad)
+                    {
+                        output.WriteLine($"First confirmed bad candidate: {finding.Candidate}");
+                    }
+                    else if (watch.FirstConfirmedBadCandidate is not null)
+                    {
+                        output.WriteLine($"Confirmed failing candidate: {finding.Candidate}");
+                    }
+                    else
+                    {
+                        output.WriteLine($"Observed failing candidate: {finding.Candidate}");
+                        output.WriteLine("No monotonic first-bad boundary is claimed for this watch channel.");
+                    }
+
+                    output.WriteLine($"Failure: {finding.CandidateResult.Summary}");
+                    output.WriteLine($"Normalized signature: {finding.CandidateResult.NormalizedSignature}");
+                    output.WriteLine($"Reproduce: compat-radar reproduce {finding.FindingId}");
+                }
+                else
+                {
+                    output.WriteLine($"{finding.Classification}: {finding.Candidate}");
+                    output.WriteLine($"  {finding.CandidateResult.Summary}");
+                }
             }
         }
     }

@@ -131,7 +131,7 @@ public sealed class CrossPlatformTests
         var root = TestFixture.CreateRepository("timeout");
         try
         {
-            var environment = new Dictionary<string, string>
+            var environment = new Dictionary<string, string?>
             {
                 ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
                 ["DOTNET_NOLOGO"] = "1"
@@ -141,14 +141,14 @@ public sealed class CrossPlatformTests
                 root,
                 environment,
                 TimeSpan.FromSeconds(60));
-            Assert.Equal(0, restore.ExitCode);
+            Assert.True(restore.ExitCode == 0, restore.NormalizedSignature);
 
             var build = await ProcessRunner.RunAsync(
                 new ParsedCommand("dotnet", ["build", "Fixture.csproj", "--no-restore", "--nologo"]),
                 root,
                 environment,
                 TimeSpan.FromSeconds(60));
-            Assert.Equal(0, build.ExitCode);
+            Assert.True(build.ExitCode == 0, build.NormalizedSignature);
 
             using var cancellation = new CancellationTokenSource();
             var runTask = ProcessRunner.RunAsync(

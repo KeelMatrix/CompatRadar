@@ -19,6 +19,7 @@ public sealed class EngineTests
             Assert.Equal(ResultClassification.Compatible, result.Report.Watches[0].Comparisons[0].Classification);
             Assert.Empty(result.Report.Findings);
             Assert.Equal(before, TestFixture.HashTree(root));
+            ObservedOutcomes.Record("stable-and-identical-candidate", result.Report.Watches[0].Comparisons[0].Classification);
         }
         finally { TestFixture.DeleteRepository(root); }
     }
@@ -60,6 +61,9 @@ public sealed class EngineTests
             Assert.Equal(1, result.Report.ExitCode);
             Assert.Equal(ResultClassification.FutureRegression, comparison.Classification);
             Assert.Equal("1.1.0", comparison.Witness.Candidate);
+            Assert.Contains("does not contain a definition for", comparison.CandidateResult.NormalizedSignature, StringComparison.Ordinal);
+            Assert.All(comparison.CandidateResult.Attempts, attempt =>
+                Assert.Contains("does not contain a definition for", attempt.NormalizedSignature, StringComparison.Ordinal));
             Assert.Contains("-p:UseSharedCompilation=false", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
             Assert.False(string.IsNullOrWhiteSpace(comparison.Witness.Fingerprint));
             Assert.False(string.IsNullOrWhiteSpace(comparison.Witness.RepositoryIdentity));
@@ -69,6 +73,7 @@ public sealed class EngineTests
             Assert.Equal(comparison.StableControl.Attempts, comparison.Witness.StableAttempts);
             Assert.Equal(comparison.CandidateResult.Attempts, comparison.Witness.CandidateAttempts);
             Assert.Contains("\"version\":1", comparison.Witness.ReproductionConfiguration, StringComparison.Ordinal);
+            ObservedOutcomes.Record("reproducible-candidate-failure", comparison.Classification);
         }
         finally { TestFixture.DeleteRepository(root); }
     }
@@ -86,6 +91,10 @@ public sealed class EngineTests
             Assert.Equal(1, result.Report.ExitCode);
             Assert.Equal("1.1.0", result.Report.Watches[0].FirstConfirmedBadCandidate);
             Assert.Equal(["1.1.0", "2.0.0"], result.Report.Watches[0].ObservedFailingCandidates);
+            foreach (var observed in result.Report.Watches[0].Comparisons)
+            {
+                ObservedOutcomes.Record($"monotonic-{observed.Candidate}", observed.Classification);
+            }
         }
         finally { TestFixture.DeleteRepository(root); }
     }
@@ -200,10 +209,12 @@ public sealed class EngineTests
             var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
             var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
             var comparison = Assert.Single(result.Report.Watches[0].Comparisons);
+            var candidateMajor = Version.Parse(candidate.Split('-', 2)[0]).Major;
 
             Assert.Equal(ResultClassification.Compatible, comparison.Classification);
             Assert.True(comparison.CandidateEvaluated);
-            Assert.Contains("runtime-selection-confirmed", comparison.CandidateResult.Attempts[0].Summary, StringComparison.Ordinal);
+            Assert.Contains($"runtime-major-{candidateMajor}-", comparison.CandidateResult.Attempts[0].Summary, StringComparison.Ordinal);
+            Assert.Contains("runtime-major-8-", comparison.StableControl.Attempts[0].Summary, StringComparison.Ordinal);
             Assert.Contains($"RuntimeFrameworkVersion={candidate}", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
             Assert.Contains("RollForward=Disable", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
             Assert.Contains("UseSharedCompilation=false", comparison.Witness.ValidationCommand, StringComparison.Ordinal);
@@ -218,6 +229,7 @@ public sealed class EngineTests
                 .GetProperty("runtime")
                 .GetString());
             Assert.Equal(before, TestFixture.HashTree(root));
+            ObservedOutcomes.Record("runtime-preview-exact-selection", comparison.Classification);
         }
         finally { TestFixture.DeleteRepository(root); }
     }
@@ -229,7 +241,7 @@ public sealed class EngineTests
         try
         {
             var candidate = TestFixture.FindInstalledRuntimeVersion();
-            TestFixture.WriteRuntimeConfiguration(root, "runtime-selection-failure", candidate, confirmationRuns: 2);
+            TestFixture.WriteRuntimeConfiguration(root, "runtime-incompatible", candidate, confirmationRuns: 2);
             var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
             var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
             var comparison = Assert.Single(result.Report.Watches[0].Comparisons);
@@ -237,7 +249,9 @@ public sealed class EngineTests
             Assert.Equal(ResultClassification.FutureRegression, comparison.Classification);
             Assert.Equal(candidate, comparison.Witness.Runtime);
             Assert.Equal(2, comparison.CandidateResult.Attempts.Count);
-            Assert.All(comparison.CandidateResult.Attempts, attempt => Assert.Contains("runtime-selection-confirmed", attempt.Summary, StringComparison.Ordinal));
+            Assert.All(comparison.CandidateResult.Attempts, attempt => Assert.Contains("requires the .NET 8 runtime", attempt.Summary, StringComparison.Ordinal));
+            Assert.All(comparison.StableControl.Attempts, attempt => Assert.Contains("runtime-major-8-", attempt.Summary, StringComparison.Ordinal));
+            ObservedOutcomes.Record("runtime-preview-incompatible-candidate", comparison.Classification);
         }
         finally { TestFixture.DeleteRepository(root); }
     }
@@ -255,6 +269,10 @@ public sealed class EngineTests
 
             Assert.Null(watch.FirstConfirmedBadCandidate);
             Assert.Equal(["1.1.0"], watch.ObservedFailingCandidates);
+            foreach (var observed in watch.Comparisons)
+            {
+                ObservedOutcomes.Record($"non-monotonic-{observed.Candidate}", observed.Classification);
+            }
         }
         finally { TestFixture.DeleteRepository(root); }
     }
@@ -270,6 +288,85 @@ public sealed class EngineTests
         Assert.DoesNotContain("abc", diagnostic, StringComparison.Ordinal);
         Assert.DoesNotContain("xyz", diagnostic, StringComparison.Ordinal);
         Assert.True(diagnostic.Length <= 2000);
+    }
+
+    [Fact]
+    public async Task InstalledSdkCandidateCanProduceAConfirmedFutureRegression()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            var candidate = TestFixture.FindInstalledSdkVersion();
+            TestFixture.WriteSdkConfiguration(root, candidate, confirmationRuns: 2);
+            var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
+            var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+            var comparison = Assert.Single(result.Report.Watches[0].Comparisons);
+
+            Assert.Equal(ResultClassification.FutureRegression, comparison.Classification);
+            Assert.Equal(1, result.Report.ExitCode);
+            Assert.Equal(candidate, comparison.Witness.Sdk);
+            Assert.Equal(2, comparison.CandidateResult.Attempts.Count);
+            Assert.All(comparison.CandidateResult.Attempts, attempt =>
+                Assert.Contains("requires the .NET 8 SDK", attempt.NormalizedSignature, StringComparison.Ordinal));
+            ObservedOutcomes.Record("sdk-preview-incompatible-candidate", comparison.Classification);
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
+    public void ComparisonEnvironmentDoesNotDescribeTheWatchedCandidate()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "compat-radar-env");
+        var stable = RadarEngine.BuildComparisonEnvironment(Path.Combine(root, "stable"), runtimeCandidate: null);
+        var candidate = RadarEngine.BuildComparisonEnvironment(Path.Combine(root, "candidate"), runtimeCandidate: null);
+        var runtime = RadarEngine.BuildComparisonEnvironment(Path.Combine(root, "runtime"), runtimeCandidate: "9.0.0");
+
+        Assert.DoesNotContain(stable.Keys, key => key.Contains("CANDIDATE", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(stable.Keys, key => key.Contains("ATTEMPT", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(stable.Keys.OrderBy(key => key, StringComparer.Ordinal), candidate.Keys.OrderBy(key => key, StringComparer.Ordinal));
+        var differing = stable.Keys.Where(key => !string.Equals(stable[key], candidate[key], StringComparison.Ordinal)).ToArray();
+        Assert.Equal(["NUGET_PACKAGES"], differing);
+
+        // A runtime-preview candidate changes only the runtime host selection that implements the
+        // watched dimension; no other comparison variable differs.
+        var runtimeSpecific = runtime.Keys.Except(stable.Keys, StringComparer.Ordinal).OrderBy(key => key, StringComparer.Ordinal).ToArray();
+        Assert.Equal(["DOTNET_ROLL_FORWARD", "DOTNET_ROLL_FORWARD_TO_PRERELEASE"], runtimeSpecific);
+    }
+
+    [Fact]
+    public async Task WitnessRecordsTheTestedContentIdentityForADirtyWorktree()
+    {
+        var root = TestFixture.CreateRepository("pass");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "pass", "\"1.0.0\"", confirmationRuns: 1);
+            Assert.Equal(0, TestFixture.RunGit(root, ["init", "-q"]).ExitCode);
+            TestFixture.RunGit(root, ["config", "user.email", "keelmatrix@gmail.com"]);
+            TestFixture.RunGit(root, ["config", "user.name", "KeelMatrix"]);
+            TestFixture.RunGit(root, ["add", "-A"]);
+            Assert.Equal(0, TestFixture.RunGit(root, ["commit", "-q", "-m", "fixture"]).ExitCode);
+            var head = TestFixture.RunGit(root, ["rev-parse", "HEAD"]).Output.Trim();
+            var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
+
+            var clean = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+            var cleanWitness = clean.Report.Watches[0].Comparisons[0].Witness;
+            Assert.False(cleanWitness.RepositoryWorktreeDirty);
+            Assert.Equal(head, cleanWitness.RepositoryRevision);
+            Assert.Equal(MaterializationScope.ComputeRepositoryContentHash(root), cleanWitness.RepositoryContentHash);
+
+            File.WriteAllText(
+                Path.Combine(root, "Program.cs"),
+                File.ReadAllText(Path.Combine(root, "Program.cs")) + Environment.NewLine + "// local modification" + Environment.NewLine);
+            File.WriteAllText(Path.Combine(root, "untracked-note.txt"), "local change");
+
+            var dirty = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+            var dirtyWitness = dirty.Report.Watches[0].Comparisons[0].Witness;
+            Assert.True(dirtyWitness.RepositoryWorktreeDirty);
+            Assert.Equal(head, dirtyWitness.RepositoryRevision);
+            Assert.Equal(MaterializationScope.ComputeRepositoryContentHash(root), dirtyWitness.RepositoryContentHash);
+            Assert.NotEqual(cleanWitness.RepositoryContentHash, dirtyWitness.RepositoryContentHash);
+        }
+        finally { TestFixture.DeleteRepository(root); }
     }
 
     [Fact]

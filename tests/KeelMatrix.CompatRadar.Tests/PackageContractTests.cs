@@ -45,6 +45,38 @@ public sealed class PackageContractTests
         }
     }
 
+    [Fact]
+    public void PackageReadmeLinkToUnpackedContentFailsInspection()
+    {
+        var packageDirectory = PackToTemporaryDirectory();
+        try
+        {
+            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg");
+            using (var archive = ZipFile.Open(packagePath, ZipArchiveMode.Update))
+            {
+                var readme = archive.GetEntry("README.md") ?? throw new InvalidOperationException("The packed README is missing.");
+                string contents;
+                using (var reader = new StreamReader(readme.Open()))
+                {
+                    contents = reader.ReadToEnd();
+                }
+
+                readme.Delete();
+                using var writer = new StreamWriter(archive.CreateEntry("README.md").Open());
+                writer.Write(contents + Environment.NewLine + "See [compatibility policy](docs/compatibility.md)." + Environment.NewLine);
+            }
+
+            var result = Inspect(packageDirectory);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("does not resolve to an entry in the package", result.Output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(packageDirectory);
+        }
+    }
+
     private static string PackToTemporaryDirectory()
     {
         var root = FindRepositoryRoot();

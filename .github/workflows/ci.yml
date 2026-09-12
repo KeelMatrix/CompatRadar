@@ -172,8 +172,8 @@ jobs:
           path: artifacts/test-results
           if-no-files-found: error
 
-  technical-validation:
-    name: Technical validation gate
+  validation-corpus:
+    name: Validation corpus
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -243,7 +243,7 @@ jobs:
         with:
           dotnet-version: 11.0.100-rc.1.26425.128
 
-      - name: Run exact technical-validation gate
+      - name: Run validation corpus
         shell: pwsh
         run: |
           $paths = @(
@@ -254,35 +254,33 @@ jobs:
             'gate-corpus/WireMock.Net',
             'gate-corpus/Verify'
           )
-          $gateParameters = @{
-            OutputPath = 'artifacts/technical-validation-gate.md'
-            CorpusManifestPath = 'scripts/technical-validation-corpus.json'
-            GroundTruthKeyPath = 'scripts/technical-validation-ground-truth.json'
-            BlindJudgeOutputPath = 'artifacts/technical-validation-blind-judge'
+          $corpusParameters = @{
+            OutputPath = 'artifacts/validation-corpus.md'
+            CorpusManifestPath = 'scripts/validation-corpus.json'
+            WitnessPackOutputPath = 'artifacts/validation-witness-pack'
             PreviewCandidate = @(
               '11.0.100-preview.7.26381.103',
               '11.0.100-rc.1.26425.128'
             )
             RealRepositoryPath = $paths
           }
-          & ./scripts/technical-validation-gate.ps1 @gateParameters
-          if ($LASTEXITCODE -ne 0) { throw "Technical validation gate did not pass (exit $LASTEXITCODE)." }
+          & ./scripts/validation-corpus.ps1 @corpusParameters
+          if ($LASTEXITCODE -ne 0) { throw "Validation corpus run did not pass (exit $LASTEXITCODE)." }
 
-      - name: Publish technical-validation evidence in job summary
+      - name: Publish validation evidence in job summary
         shell: pwsh
-        run: Get-Content -LiteralPath artifacts/technical-validation-gate.md -Raw | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+        run: Get-Content -LiteralPath artifacts/validation-corpus.md -Raw | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-      - name: Upload technical-validation evidence
+      - name: Upload validation evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: technical-validation-gate
+          name: validation-corpus
           if-no-files-found: warn
           path: |
-            artifacts/technical-validation-gate.md
-            artifacts/technical-validation-gate.json
-            artifacts/technical-validation-ground-truth.json
-            artifacts/technical-validation-blind-judge
+            artifacts/validation-corpus.md
+            artifacts/validation-corpus.json
+            artifacts/validation-witness-pack
 
   package:
     name: Package / inspect
@@ -462,15 +460,36 @@ jobs:
           New-Item -ItemType Directory -Path action-fixture | Out-Null
           @'
           <Project Sdk="Microsoft.NET.Sdk">
-            <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+            <PropertyGroup>
+              <OutputType>Exe</OutputType>
+              <TargetFramework>net8.0</TargetFramework>
+              <ImplicitUsings>enable</ImplicitUsings>
+              <UseAppHost>false</UseAppHost>
+            </PropertyGroup>
           </Project>
           '@ | Set-Content action-fixture/Fixture.csproj
           @'
-          if (Environment.GetEnvironmentVariable("COMPATRADAR_FORCE_ACTION_FAILURE") == "1" && Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE") == "1") { Console.Error.WriteLine("planted action failure"); Environment.Exit(19); }
+          Console.WriteLine("action fixture passed");
           '@ | Set-Content action-fixture/Program.cs
+          @'
+          <Project>
+            <Target Name="VerifySupportedSdk" BeforeTargets="CoreCompile">
+              <Error Condition="!$(NETCoreSdkVersion.StartsWith('8.0'))" Text="error: this repository requires the .NET 8 SDK; observed SDK $(NETCoreSdkVersion)." />
+            </Target>
+          </Project>
+          '@ | Set-Content action-fixture/Directory.Build.props
           @'
           { "version": 1, "control": { "sdk": "current" }, "watch": [{ "kind": "sdk-preview", "candidates": ["8.0.424"] }], "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": "action-fixture", "timeoutSeconds": 120 }, "policy": { "confirmationRuns": 1 } }
           '@ | Set-Content action-fixture/compat-radar.json
+          $incompatibleSdk = (dotnet --list-sdks |
+            ForEach-Object { ($_ -split ' ')[0] } |
+            Where-Object { $_ -notmatch '^8\.' } |
+            Sort-Object -Descending |
+            Select-Object -First 1)
+          if (-not $incompatibleSdk) { throw 'The Action smoke requires an installed SDK other than the pinned 8.x SDK.' }
+          $candidateJson = '"' + $incompatibleSdk + '"'
+          (Get-Content -LiteralPath action-fixture/compat-radar.json -Raw).Replace('"8.0.424"', $candidateJson) |
+            Set-Content action-fixture/incompatible-sdk.json
 
       - name: Action pass path
         uses: ./
@@ -480,15 +499,14 @@ jobs:
           config: action-fixture/compat-radar.json
           report: action-fixture/pass.json
 
-      - name: Action failure path, summary, and report
+      - name: Action regression path, summary, and report
         id: regression
         continue-on-error: true
         uses: ./
         env:
-          COMPATRADAR_FORCE_ACTION_FAILURE: '1'
           COMPATRADAR_ACTION_SUMMARY: ${{ runner.temp }}/compatradar-action-summary.md
         with:
-          config: action-fixture/compat-radar.json
+          config: action-fixture/incompatible-sdk.json
           report: action-fixture/failure.json
 
       - name: Assert Action contract

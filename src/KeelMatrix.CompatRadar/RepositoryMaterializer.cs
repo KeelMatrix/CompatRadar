@@ -9,6 +9,7 @@ namespace KeelMatrix.CompatRadar;
 internal sealed class MaterializationScope : IDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly string[] ExcludedSegments = [".git", "bin", "obj", ".vs", ".nuget", ".dotnet", "artifacts", "TestResults"];
     private readonly string root;
 
     private MaterializationScope(string root)
@@ -60,8 +61,7 @@ internal sealed class MaterializationScope : IDisposable
                 }
 
                 var relative = Path.GetRelativePath(source, entry);
-                var firstSegment = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
-                if (firstSegment is ".git" or "bin" or "obj" or ".vs" or ".nuget" or ".dotnet" or "artifacts" or "TestResults")
+                if (IsExcludedRelativePath(relative))
                 {
                     continue;
                 }
@@ -79,6 +79,134 @@ internal sealed class MaterializationScope : IDisposable
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// True when a repository-relative path is outside the materialized comparison content
+    /// (Git metadata, build output, local caches, and local artifacts).
+    /// </summary>
+    public static bool IsExcludedRelativePath(string relativePath)
+    {
+        var firstSegment = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
+        return ExcludedSegments.Contains(firstSegment, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Computes a deterministic identity of exactly the content a comparison materializes,
+    /// so a witness can identify the tested source state even when the working tree has
+    /// uncommitted changes that Git metadata alone does not describe.
+    /// </summary>
+    public static string ComputeRepositoryContentHash(string repository)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var file in EnumerateMaterializedFiles(repository))
+        {
+            hash.AppendData(Encoding.UTF8.GetBytes(Path.GetRelativePath(repository, file).Replace(Path.DirectorySeparatorChar, '/')));
+            hash.AppendData([0]);
+            hash.AppendData(File.ReadAllBytes(file));
+            hash.AppendData([0]);
+        }
+
+        return "sha256:" + Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// True when Git reports local modifications or untracked files among the content that a
+    /// comparison materializes. Repositories without usable Git metadata report false because
+    /// their revision is already derived from the materialized content itself.
+    /// </summary>
+    public static bool HasUncommittedMaterializedChanges(string repository)
+    {
+        try
+        {
+            var gitDirectory = Path.Combine(repository, ".git");
+            if (!Directory.Exists(gitDirectory) && !File.Exists(gitDirectory))
+            {
+                return false;
+            }
+
+            using var process = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "git",
+                    WorkingDirectory = repository,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+            process.StartInfo.ArgumentList.Add("status");
+            process.StartInfo.ArgumentList.Add("--porcelain");
+            process.StartInfo.ArgumentList.Add("--untracked-files=all");
+            process.Start();
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit(5000);
+            if (process.ExitCode != 0)
+            {
+                return false;
+            }
+
+            return output
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(line => NormalizeStatusPath(line.Length > 3 ? line[3..] : line))
+                .Where(path => path.Length > 0)
+                .Any(path => !IsExcludedRelativePath(path));
+        }
+        catch
+        {
+            // An unusable Git client cannot make the content identity less deterministic.
+            return false;
+        }
+    }
+
+    private static string NormalizeStatusPath(string statusPath)
+    {
+        var path = statusPath.Trim();
+        var renameIndex = path.IndexOf(" -> ", StringComparison.Ordinal);
+        if (renameIndex >= 0)
+        {
+            path = path[(renameIndex + 4)..];
+        }
+
+        path = path.Trim().Trim('"').Replace('\\', '/');
+        return path.TrimStart('/');
+    }
+
+    private static IEnumerable<string> EnumerateMaterializedFiles(string repository)
+    {
+        var files = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(repository);
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            foreach (var entry in Directory.EnumerateFileSystemEntries(current))
+            {
+                var attributes = File.GetAttributes(entry);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    continue;
+                }
+
+                if (IsExcludedRelativePath(Path.GetRelativePath(repository, entry)))
+                {
+                    continue;
+                }
+
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    pending.Push(entry);
+                }
+                else
+                {
+                    files.Add(entry);
+                }
+            }
+        }
+
+        return files.OrderBy(file => Path.GetRelativePath(repository, file), StringComparer.Ordinal);
     }
 
     public static CandidateOverrideResult ApplyPackageOverride(string repository, string package, string candidateVersion)
@@ -282,10 +410,7 @@ internal sealed class MaterializationScope : IDisposable
         }
 
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        foreach (var file in Directory.EnumerateFiles(repository, "*", SearchOption.AllDirectories)
-                     .Where(file => !Path.GetRelativePath(repository, file).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                         .Any(part => part is ".git" or "bin" or "obj" or ".nuget" or ".dotnet" or "artifacts"))
-                     .OrderBy(file => Path.GetRelativePath(repository, file), StringComparer.OrdinalIgnoreCase))
+        foreach (var file in EnumerateMaterializedFiles(repository))
         {
             hash.AppendData(Encoding.UTF8.GetBytes(Path.GetRelativePath(repository, file).Replace(Path.DirectorySeparatorChar, '/')));
             hash.AppendData([0]);

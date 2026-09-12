@@ -4,6 +4,12 @@ param(
     [string] $PackagePath
 )
 
+# Installs the built tool package in isolation and exercises the documented consumer path against a
+# repository whose dependency package genuinely changes: the compatible version keeps the API the
+# fixture calls, a later version changes behavior, and the newest version removes that API. The
+# observed candidate failures therefore come from the dependency state, not from anything the tool
+# injects into the comparison.
+
 $ErrorActionPreference = 'Stop'
 $telemetryWasSet = Test-Path Env:KEELMATRIX_NO_TELEMETRY
 $telemetryValue = $env:KEELMATRIX_NO_TELEMETRY
@@ -30,7 +36,8 @@ $fixture = Join-Path $root 'fixture'
 $packages = Join-Path $root 'nuget-packages'
 $httpCache = Join-Path $root 'nuget-http-cache'
 $nugetConfig = Join-Path $root 'NuGet.Config'
-New-Item -ItemType Directory -Path $toolPath, $fixture, $packages, $httpCache | Out-Null
+$dependencyFeed = Join-Path $root 'dependency-feed'
+New-Item -ItemType Directory -Path $toolPath, $fixture, $packages, $httpCache, $dependencyFeed | Out-Null
 $localSource = [Security.SecurityElement]::Escape((Split-Path $package))
 $nugetXml = @"
 <?xml version="1.0" encoding="utf-8"?>
@@ -61,15 +68,88 @@ $env:NUGET_PLUGINS_CACHE_PATH = Join-Path $root 'nuget-plugins-cache'
 $env:DOTNET_CLI_HOME = Join-Path $root 'dotnet-home'
 New-Item -ItemType Directory -Path $env:NUGET_PLUGINS_CACHE_PATH, $env:DOTNET_CLI_HOME | Out-Null
 
+function New-SmokeDependencyPackage {
+    param([string] $Version, [bool] $RemovesApi)
+
+    $projectDirectory = Join-Path $root "dependency-$Version"
+    New-Item -ItemType Directory -Force -Path $projectDirectory | Out-Null
+    Set-Content -LiteralPath (Join-Path $projectDirectory 'NuGet.config') -Value @'
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+  </packageSources>
+</configuration>
+'@
+    Set-Content -LiteralPath (Join-Path $projectDirectory 'SmokeDependency.csproj') -Value @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>CompatRadar.SmokeDependency</AssemblyName>
+    <PackageId>CompatRadar.SmokeDependency</PackageId>
+    <Version>$Version</Version>
+    <Authors>KeelMatrix</Authors>
+    <Description>Deterministic consumer-smoke dependency package.</Description>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IncludeSymbols>false</IncludeSymbols>
+  </PropertyGroup>
+</Project>
+"@
+    $api = if ($RemovesApi) { 'public static string DescribeV2() => "smoke dependency" + PackageVersion;' } else { 'public static string Describe() => "smoke dependency" + PackageVersion;' }
+    Set-Content -LiteralPath (Join-Path $projectDirectory 'Api.cs') -Value @"
+namespace CompatRadar.SmokeDependency;
+
+public static class SmokeApi
+{
+    public const string PackageVersion = "$Version";
+
+    $api
+}
+"@
+    & dotnet pack (Join-Path $projectDirectory 'SmokeDependency.csproj') -c Release --nologo --output $dependencyFeed | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "smoke dependency package $Version could not be built" }
+    if (-not (Test-Path -LiteralPath (Join-Path $dependencyFeed "CompatRadar.SmokeDependency.$Version.nupkg"))) { throw "smoke dependency package $Version is missing" }
+}
+
+function Set-SmokeConfiguration {
+    param([string] $FileName, [string] $Candidates, [int] $ConfirmationRuns = 1)
+
+    Set-Content -LiteralPath (Join-Path $fixture $FileName) -Value @"
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [{ "kind": "nuget-prerelease", "package": "CompatRadar.SmokeDependency", "candidates": [$Candidates] }],
+  "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": ".", "timeoutSeconds": 120 },
+  "policy": { "confirmationRuns": $ConfirmationRuns }
+}
+"@
+}
+
 try {
     dotnet tool install --tool-path $toolPath --configfile $nugetConfig KeelMatrix.CompatRadar --version $packageVersion --no-cache --ignore-failed-sources | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'dotnet tool install failed' }
+
+    New-SmokeDependencyPackage -Version '1.0.0' -RemovesApi $false
+    New-SmokeDependencyPackage -Version '1.1.0' -RemovesApi $false
+    New-SmokeDependencyPackage -Version '2.0.0' -RemovesApi $true
 
     Set-Content -LiteralPath (Join-Path $fixture 'global.json') -Value @'
 {
   "sdk": { "version": "8.0.424", "rollForward": "latestPatch", "allowPrerelease": false }
 }
 '@
+    Set-Content -LiteralPath (Join-Path $fixture 'NuGet.Config') -Value @"
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="dependency" value="$($dependencyFeed.Replace('\', '/'))" />
+  </packageSources>
+</configuration>
+"@
     Set-Content -LiteralPath (Join-Path $fixture 'Fixture.csproj') -Value @'
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
@@ -77,20 +157,39 @@ try {
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UseAppHost>false</UseAppHost>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CompatRadar.SmokeDependency" Version="1.0.0" />
+  </ItemGroup>
 </Project>
 '@
     Set-Content -LiteralPath (Join-Path $fixture 'Program.cs') -Value @'
-var candidate = Environment.GetEnvironmentVariable("COMPATRADAR_CANDIDATE") == "1";
-var attempt = Environment.GetEnvironmentVariable("COMPATRADAR_ATTEMPT") ?? "0";
-var behavior = File.Exists("smoke-behavior.txt") ? File.ReadAllText("smoke-behavior.txt").Trim() : "";
-if (behavior == "baseline") {
+using System;
+using System.Globalization;
+using System.IO;
+using CompatRadar.SmokeDependency;
+
+var behavior = File.Exists("smoke-behavior.txt") ? File.ReadAllText("smoke-behavior.txt").Trim() : string.Empty;
+var version = SmokeApi.PackageVersion;
+if (behavior == "baseline")
+{
+    Console.Error.WriteLine("error: baseline repository validation is already failing");
     Environment.Exit(18);
 }
-if (behavior == "flaky" && candidate && attempt == "1") {
-    Environment.Exit(18);
+if (behavior == "flaky" && version != "1.0.0")
+{
+    const string attemptFile = ".smoke-attempt";
+    var attempt = File.Exists(attemptFile) && int.TryParse(File.ReadAllText(attemptFile), out var parsed) ? parsed + 1 : 1;
+    File.WriteAllText(attemptFile, attempt.ToString(CultureInfo.InvariantCulture));
+    if (attempt == 1)
+    {
+        Console.Error.WriteLine("error: flaky repository test failed on the first attempt");
+        Environment.Exit(18);
+    }
 }
-if (behavior == "future-break" && candidate) {
+if (version != "1.0.0")
+{
     Console.Error.WriteLine("MY_SECRET=smoke-secret-value");
     Console.Error.WriteLine("API_KEY=\"smoke-quoted-api-key\"");
     Console.Error.WriteLine("TOKEN=smoke-token-value");
@@ -98,117 +197,123 @@ if (behavior == "future-break" && candidate) {
     Console.Error.WriteLine("{\"apiKey\": \"smoke-json-api-key\", \"password\": \"smoke-json-password\", \"access_token\": \"smoke-json-access-token\", \"privateKey\": \"smoke-private-key-value\", \"client_secret\": \"smoke-client-secret-value\", \"auth_token\": \"smoke-auth-token-value\", \"ConnectionString\": \"smoke-connection-string-value\", \"opaque\": \"smoke-fallback-opaque-value-12345\", \"message\": \"ordinary diagnostic\"}");
     Environment.Exit(19);
 }
+Console.WriteLine("smoke fixture passed for dependency " + version);
+Console.WriteLine(SmokeApi.Describe());
 '@
     Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value ''
-    $config = Join-Path $fixture 'compat-radar.json'
-    Set-Content -LiteralPath $config -Value @'
-{
-  "version": 1,
-  "control": { "sdk": "current" },
-  "watch": [{ "kind": "sdk-preview", "candidates": ["8.0.424"] }],
-  "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": ".", "timeoutSeconds": 120 },
-  "policy": { "confirmationRuns": 1 }
-}
-'@
-    $baseConfig = Get-Content -Raw -LiteralPath $config
+    # The tool locates the repository root from the working directory, so the fixture keeps a
+    # compat-radar.json at its root as a real consumer repository would.
+    Set-SmokeConfiguration -FileName 'compat-radar.json' -Candidates '"1.0.0"'
+    Set-SmokeConfiguration -FileName 'dependency-change.json' -Candidates '"1.1.0"'
+    Set-SmokeConfiguration -FileName 'removed-api.json' -Candidates '"2.0.0"'
+    Set-SmokeConfiguration -FileName 'baseline.json' -Candidates '"1.0.0"'
+    Set-SmokeConfiguration -FileName 'flaky.json' -Candidates '"1.1.0"' -ConfirmationRuns 2
 
     $toolName = if ($IsWindows) { 'compat-radar.exe' } else { 'compat-radar' }
     $tool = Join-Path $toolPath $toolName
     if (-not (Test-Path -LiteralPath $tool)) { throw "Installed CompatRadar tool was not found at $tool." }
     Push-Location -LiteralPath $fixture
-    & $tool check --config (Split-Path -Leaf $config) --format json --report 'stable.json'
-    if ($LASTEXITCODE -ne 0) { throw 'stable-identical package consumer smoke failed' }
+    try {
+        & $tool check --config 'compat-radar.json' --format json --report 'stable.json'
+        if ($LASTEXITCODE -ne 0) { throw 'stable-identical package consumer smoke failed' }
+        $stable = Get-Content -Raw -LiteralPath (Join-Path $fixture 'stable.json') | ConvertFrom-Json
+        if ($stable.exitCode -ne 0 -or $stable.watches[0].comparisons[0].classification -ne 'COMPATIBLE') { throw 'stable-identical report mismatch' }
 
-    Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'future-break'
-    $breakOutput = (& $tool check --config (Split-Path -Leaf $config) --format json --report 'break.json' 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 1) { throw 'planted future-break package consumer smoke failed' }
+        $breakOutput = (& $tool check --config 'dependency-change.json' --format json --report 'break.json' 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 1) { throw 'dependency-change package consumer smoke failed' }
+        $breakJson = Get-Content -Raw -LiteralPath (Join-Path $fixture 'break.json')
+        $break = $breakJson | ConvertFrom-Json
+        if ($break.exitCode -ne 1 -or $break.findings.Count -ne 1 -or $break.findings[0].classification -ne 'FUTURE_REGRESSION') { throw 'dependency-change report mismatch' }
 
-    $stable = Get-Content -Raw -LiteralPath (Join-Path $fixture 'stable.json') | ConvertFrom-Json
-    $breakJson = Get-Content -Raw -LiteralPath (Join-Path $fixture 'break.json')
-    $break = $breakJson | ConvertFrom-Json
-    if ($stable.exitCode -ne 0) { throw 'stable report exit code mismatch' }
-    if ($break.exitCode -ne 1 -or $break.findings.Count -ne 1 -or $break.findings[0].classification -ne 'FUTURE_REGRESSION') { throw 'future-break report mismatch' }
-    $sensitiveValues = @(
-        'smoke-secret-value',
-        'smoke-quoted-api-key',
-        'smoke-token-value',
-        'smoke-bearer-value',
-        'smoke-json-api-key',
-        'smoke-json-password',
-        'smoke-json-access-token',
-        'smoke-private-key-value',
-        'smoke-client-secret-value',
-        'smoke-auth-token-value',
-        'smoke-connection-string-value',
-        'smoke-fallback-opaque-value-12345'
-    )
-    $witnessOutput = (& $tool reproduce $break.findings[0].findingId --report 'break.json' --format json 2>&1 | Out-String)
-    foreach ($sensitiveValue in $sensitiveValues) {
-        if ($breakOutput.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to console" }
-        if ($breakJson.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to report" }
-        if ($witnessOutput.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to witness" }
-        foreach ($field in @(
-            [string]$break.findings[0].candidateResult.summary,
-            [string]$break.findings[0].candidateResult.normalizedSignature,
-            [string]$break.findings[0].witness.focusedFailure,
-            [string]$break.findings[0].witness.normalizedFailureSignature
-        )) {
-            if ($field.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to a report diagnostic field" }
+        $sensitiveValues = @(
+            'smoke-secret-value',
+            'smoke-quoted-api-key',
+            'smoke-token-value',
+            'smoke-bearer-value',
+            'smoke-json-api-key',
+            'smoke-json-password',
+            'smoke-json-access-token',
+            'smoke-private-key-value',
+            'smoke-client-secret-value',
+            'smoke-auth-token-value',
+            'smoke-connection-string-value',
+            'smoke-fallback-opaque-value-12345'
+        )
+        $witnessOutput = (& $tool reproduce $break.findings[0].findingId --report 'break.json' --format json 2>&1 | Out-String)
+        foreach ($sensitiveValue in $sensitiveValues) {
+            if ($breakOutput.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to console" }
+            if ($breakJson.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to report" }
+            if ($witnessOutput.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to witness" }
+            foreach ($field in @(
+                [string]$break.findings[0].candidateResult.summary,
+                [string]$break.findings[0].candidateResult.normalizedSignature,
+                [string]$break.findings[0].witness.focusedFailure,
+                [string]$break.findings[0].witness.normalizedFailureSignature
+            )) {
+                if ($field.IndexOf($sensitiveValue, [StringComparison]::Ordinal) -ge 0) { throw "installed package leaked $sensitiveValue to a report diagnostic field" }
+            }
         }
+
+        & $tool check --config 'removed-api.json' --format json --report 'removed-api-report.json' | Out-Host
+        if ($LASTEXITCODE -ne 1) { throw 'removed-api package consumer smoke failed' }
+        $removedApi = Get-Content -Raw -LiteralPath (Join-Path $fixture 'removed-api-report.json') | ConvertFrom-Json
+        if ($removedApi.exitCode -ne 1 -or $removedApi.findings[0].classification -ne 'FUTURE_REGRESSION') { throw 'removed-api report mismatch' }
+        if (([string]$removedApi.findings[0].candidateResult.normalizedSignature).IndexOf('does not contain a definition for', [StringComparison]::Ordinal) -lt 0) {
+            throw 'removed-api failure was not a genuine dependency incompatibility'
+        }
+
+        $credentialFeedSecret = 'smoke-feed-secret-value'
+        $credentialConfig = Join-Path $fixture 'credential-feed.json'
+        Set-Content -LiteralPath $credentialConfig -Value @"
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [{ "kind": "nuget-prerelease", "package": "CompatRadar.SmokeDependency", "candidates": ["1.0.0"], "feed": "https://feed.example/v3/index.json?apiKey=$credentialFeedSecret" }],
+  "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": ".", "timeoutSeconds": 120 },
+  "policy": { "confirmationRuns": 1 }
+}
+"@
+        $credentialOutput = (& $tool config validate --config (Split-Path -Leaf $credentialConfig) --format json 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 2) { throw 'credential-bearing feed URL was accepted by the installed package' }
+        if ($credentialOutput.IndexOf($credentialFeedSecret, [StringComparison]::Ordinal) -ge 0) { throw 'installed package leaked a rejected feed credential' }
+        if (Test-Path -LiteralPath (Join-Path $fixture 'credential-feed-report.json')) { throw 'credential-bearing feed validation wrote a report' }
+
+        $malformedFeedSecret = 'smoke-malformed-feed-secret'
+        $malformedFeedUrl = "https://feed.example/v3/index.json?apiKey=$malformedFeedSecret"
+        $malformedConfig = Join-Path $fixture 'malformed-feed.json'
+        Set-Content -LiteralPath $malformedConfig -Value @"
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [{ "kind": "nuget-prerelease", "package": "CompatRadar.SmokeDependency", "candidates": ["1.0.0"], "feed": { "url": "$malformedFeedUrl" } }],
+  "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": ".", "timeoutSeconds": 120 },
+  "policy": { "confirmationRuns": 1 }
+}
+"@
+        $malformedValidationOutput = (& $tool config validate --config (Split-Path -Leaf $malformedConfig) --format json 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 2) { throw 'wrong-typed optional feed was accepted by the installed package during config validation' }
+        if ($malformedValidationOutput.IndexOf($malformedFeedSecret, [StringComparison]::Ordinal) -ge 0 -or $malformedValidationOutput.IndexOf($malformedFeedUrl, [StringComparison]::Ordinal) -ge 0) { throw 'installed package echoed a malformed feed value during config validation' }
+        $malformedReport = Join-Path $fixture 'malformed-feed-report.json'
+        $malformedCheckOutput = (& $tool check --config (Split-Path -Leaf $malformedConfig) --format json --report (Split-Path -Leaf $malformedReport) 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 2) { throw 'wrong-typed optional feed was accepted by the installed package during check' }
+        if ($malformedCheckOutput.IndexOf($malformedFeedSecret, [StringComparison]::Ordinal) -ge 0 -or $malformedCheckOutput.IndexOf($malformedFeedUrl, [StringComparison]::Ordinal) -ge 0) { throw 'installed package echoed a malformed feed value during check' }
+        if (Test-Path -LiteralPath $malformedReport) { throw 'wrong-typed optional feed check wrote a report' }
+
+        Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'baseline'
+        & $tool check --config 'baseline.json' --format json --report 'baseline-report.json' | Out-Host
+        if ($LASTEXITCODE -ne 2) { throw 'baseline-failure package consumer smoke failed' }
+        $baseline = Get-Content -Raw -LiteralPath (Join-Path $fixture 'baseline-report.json') | ConvertFrom-Json
+        if ($baseline.exitCode -ne 2 -or $baseline.watches[0].comparisons[0].classification -ne 'INCONCLUSIVE_BASELINE_FAILED') { throw 'baseline report mismatch' }
+
+        Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'flaky'
+        & $tool check --config 'flaky.json' --format json --report 'flaky-report.json' | Out-Host
+        if ($LASTEXITCODE -ne 2) { throw 'flaky package consumer smoke failed' }
+        $flaky = Get-Content -Raw -LiteralPath (Join-Path $fixture 'flaky-report.json') | ConvertFrom-Json
+        if ($flaky.exitCode -ne 2 -or $flaky.watches[0].comparisons[0].classification -ne 'INCONCLUSIVE_FLAKY') { throw 'flaky report mismatch' }
     }
-
-    $credentialFeedSecret = 'smoke-feed-secret-value'
-    $credentialConfig = Join-Path $fixture 'credential-feed.json'
-    Set-Content -LiteralPath $credentialConfig -Value @"
-{
-  "version": 1,
-  "control": { "sdk": "current" },
-  "watch": [{ "kind": "nuget-prerelease", "package": "CompatRadar.TestDependency", "candidates": ["1.0.0"], "feed": "https://feed.example/v3/index.json?apiKey=$credentialFeedSecret" }],
-  "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": ".", "timeoutSeconds": 120 },
-  "policy": { "confirmationRuns": 1 }
-}
-"@
-    $credentialOutput = (& $tool config validate --config (Split-Path -Leaf $credentialConfig) --format json 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 2) { throw 'credential-bearing feed URL was accepted by the installed package' }
-    if ($credentialOutput.IndexOf($credentialFeedSecret, [StringComparison]::Ordinal) -ge 0) { throw 'installed package leaked a rejected feed credential' }
-    if (Test-Path -LiteralPath (Join-Path $fixture 'credential-feed-report.json')) { throw 'credential-bearing feed validation wrote a report' }
-
-    $malformedFeedSecret = 'smoke-malformed-feed-secret'
-    $malformedFeedUrl = "https://feed.example/v3/index.json?apiKey=$malformedFeedSecret"
-    $malformedConfig = Join-Path $fixture 'malformed-feed.json'
-    Set-Content -LiteralPath $malformedConfig -Value @"
-{
-  "version": 1,
-  "control": { "sdk": "current" },
-  "watch": [{ "kind": "nuget-prerelease", "package": "CompatRadar.TestDependency", "candidates": ["1.0.0"], "feed": { "url": "$malformedFeedUrl" } }],
-  "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": ".", "timeoutSeconds": 120 },
-  "policy": { "confirmationRuns": 1 }
-}
-"@
-    $malformedValidationOutput = (& $tool config validate --config (Split-Path -Leaf $malformedConfig) --format json 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 2) { throw 'wrong-typed optional feed was accepted by the installed package during config validation' }
-    if ($malformedValidationOutput.IndexOf($malformedFeedSecret, [StringComparison]::Ordinal) -ge 0 -or $malformedValidationOutput.IndexOf($malformedFeedUrl, [StringComparison]::Ordinal) -ge 0) { throw 'installed package echoed a malformed feed value during config validation' }
-    $malformedReport = Join-Path $fixture 'malformed-feed-report.json'
-    $malformedCheckOutput = (& $tool check --config (Split-Path -Leaf $malformedConfig) --format json --report (Split-Path -Leaf $malformedReport) 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 2) { throw 'wrong-typed optional feed was accepted by the installed package during check' }
-    if ($malformedCheckOutput.IndexOf($malformedFeedSecret, [StringComparison]::Ordinal) -ge 0 -or $malformedCheckOutput.IndexOf($malformedFeedUrl, [StringComparison]::Ordinal) -ge 0) { throw 'installed package echoed a malformed feed value during check' }
-    if (Test-Path -LiteralPath $malformedReport) { throw 'wrong-typed optional feed check wrote a report' }
-
-    Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'baseline'
-    $baselineConfig = $baseConfig
-    Set-Content -LiteralPath $config -Value $baselineConfig
-    & $tool check --config (Split-Path -Leaf $config) --format json --report 'baseline.json' | Out-Host
-    if ($LASTEXITCODE -ne 2) { throw 'baseline-failure package consumer smoke failed' }
-    $baseline = Get-Content -Raw -LiteralPath (Join-Path $fixture 'baseline.json') | ConvertFrom-Json
-    if ($baseline.exitCode -ne 2 -or $baseline.watches[0].comparisons[0].classification -ne 'INCONCLUSIVE_BASELINE_FAILED') { throw 'baseline report mismatch' }
-
-    Set-Content -LiteralPath (Join-Path $fixture 'smoke-behavior.txt') -Value 'flaky'
-    $flakyConfig = $baselineConfig.Replace('"confirmationRuns": 1', '"confirmationRuns": 2')
-    Set-Content -LiteralPath $config -Value $flakyConfig
-    & $tool check --config (Split-Path -Leaf $config) --format json --report 'flaky.json' | Out-Host
-    if ($LASTEXITCODE -ne 2) { throw 'flaky package consumer smoke failed' }
-    $flaky = Get-Content -Raw -LiteralPath (Join-Path $fixture 'flaky.json') | ConvertFrom-Json
-    if ($flaky.exitCode -ne 2 -or $flaky.watches[0].comparisons[0].classification -ne 'INCONCLUSIVE_FLAKY') { throw 'flaky report mismatch' }
+    finally {
+        Pop-Location
+    }
 
     Write-Host 'Package consumer smoke passed.'
 }

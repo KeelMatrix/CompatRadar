@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Pinned repository and candidate corpus used to produce reproducible compatibility evidence and an unlabeled witness pack.",
+  "repositories": [
+    {
+      "name": "KeelMatrix.Redaction",
+      "repository": "KeelMatrix/Redaction",
+      "ref": "47c74880ff7f50e554cb9f06d84507f4a78a7818",
+      "path": "gate-corpus/KeelMatrix.Redaction",
+      "complexityProfile": "small focused CLI and test repository"
+    },
+    {
+      "name": "KeelMatrix.Telemetry",
+      "repository": "KeelMatrix/Telemetry",
+      "ref": "225eca7002386cba951654da3dc963c14b0ba18e",
+      "path": "gate-corpus/KeelMatrix.Telemetry",
+      "complexityProfile": "shared library with package and telemetry integration"
+    },
+    {
+      "name": "KeelMatrix.QueryWatch",
+      "repository": "KeelMatrix/QueryWatch",
+      "ref": "3d93c9cc3e86d77e14880058a9df846040af282f",
+      "path": "gate-corpus/KeelMatrix.QueryWatch",
+      "complexityProfile": "multi-project CLI and service integration repository"
+    },
+    {
+      "name": "RichardSzalay.MockHttp",
+      "repository": "richardszalay/mockhttp",
+      "ref": "459a661fc483f7a56e758d804d08a8618aa43c85",
+      "path": "gate-corpus/RichardSzalay.MockHttp",
+      "complexityProfile": "small focused HTTP-testing library"
+    },
+    {
+      "name": "WireMock.Net",
+      "repository": "wiremock/WireMock.Net",
+      "ref": "42353f035eed154c50e080f79a77e2a69bc3a6dc",
+      "path": "gate-corpus/WireMock.Net",
+      "complexityProfile": "large multi-project HTTP-mocking library with integrations"
+    },
+    {
+      "name": "Verify",
+      "repository": "VerifyTests/Verify",
+      "ref": "424b010734f34a7257613ecbdc489e387aae4900",
+      "path": "gate-corpus/Verify",
+      "complexityProfile": "multi-package snapshot-testing ecosystem"
+    }
+  ],
+  "previewCandidates": [
+    {
+      "version": "11.0.100-preview.7.26381.103",
+      "runtimeVersion": "11.0.0-preview.7.26381.103"
+    },
+    {
+      "version": "11.0.100-rc.1.26425.128",
+      "runtimeVersion": "11.0.0-rc.1.26425.128"
+    }
+  ],
+  "expectedOutcomes": [
+    {
+      "case": "stable-and-identical-candidate",
+      "group": "equivalent",
+      "expectedClassification": "COMPATIBLE",
+      "source": "StableAndIdenticalCandidateAreCompatibleAndDoNotMutateWorktree"
+    },
+    {
+      "case": "monotonic-1.0.0",
+      "group": "equivalent",
+      "expectedClassification": "COMPATIBLE",
+      "source": "MonotonicCandidateSequenceLocalizesFirstConfirmedFailure"
+    },
+    {
+      "case": "monotonic-1.1.0",
+      "group": "incompatible",
+      "expectedClassification": "FUTURE_REGRESSION",
+      "source": "MonotonicCandidateSequenceLocalizesFirstConfirmedFailure"
+    },
+    {
+      "case": "monotonic-2.0.0",
+      "group": "incompatible",
+      "expectedClassification": "FUTURE_REGRESSION",
+      "source": "MonotonicCandidateSequenceLocalizesFirstConfirmedFailure"
+    },
+    {
+      "case": "non-monotonic-1.0.0",
+      "group": "equivalent",
+      "expectedClassification": "COMPATIBLE",
+      "source": "NonMonotonicSequenceDoesNotClaimFirstBad"
+    },
+    {
+      "case": "non-monotonic-1.1.0",
+      "group": "incompatible",
+      "expectedClassification": "FUTURE_REGRESSION",
+      "source": "NonMonotonicSequenceDoesNotClaimFirstBad"
+    },
+    {
+      "case": "non-monotonic-2.0.0",
+      "group": "equivalent",
+      "expectedClassification": "COMPATIBLE",
+      "source": "NonMonotonicSequenceDoesNotClaimFirstBad"
+    },
+    {
+      "case": "reproducible-candidate-failure",
+      "group": "incompatible",
+      "expectedClassification": "FUTURE_REGRESSION",
+      "source": "ReproducibleCandidateFailureIsFutureRegression"
+    },
+    {
+      "case": "runtime-preview-exact-selection",
+      "group": "equivalent",
+      "expectedClassification": "COMPATIBLE",
+      "source": "InstalledRuntimePreviewIsSelectedIndependentlyOfTheSdk"
+    },
+    {
+      "case": "runtime-preview-incompatible-candidate",
+      "group": "incompatible",
+      "expectedClassification": "FUTURE_REGRESSION",
+      "source": "InstalledRuntimePreviewCanProduceAConfirmedFutureRegression"
+    },
+    {
+      "case": "sdk-preview-incompatible-candidate",
+      "group": "incompatible",
+      "expectedClassification": "FUTURE_REGRESSION",
+      "source": "InstalledSdkCandidateCanProduceAConfirmedFutureRegression"
+    }
+  ],
+  "requiredEvidence": [
+    "incompatible-candidate-detection",
+    "equivalent-state-false-regression-check",
+    "stable-control-confirmation",
+    "flaky-classification",
+    "monotonic-and-non-monotonic-handling",
+    "additive-feed-behavior",
+    "unsupported-preview-behavior",
+    "runtime",
+    "restore-cost",
+    "cleanup",
+    "unlabeled-witness-pack",
+    "witness-pack-structural-validation"
+  ]
+}

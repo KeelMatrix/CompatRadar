@@ -121,7 +121,7 @@ internal static class ProcessRunner
     public static async Task<ProcessExecutionResult> RunAsync(
         ParsedCommand command,
         string workingDirectory,
-        IReadOnlyDictionary<string, string> environment,
+        IReadOnlyDictionary<string, string?> environment,
         TimeSpan timeout,
         CancellationToken cancellationToken = default)
     {
@@ -144,7 +144,14 @@ internal static class ProcessRunner
 
         foreach (var (key, value) in environment)
         {
-            process.StartInfo.Environment[key] = value;
+            if (value is null)
+            {
+                process.StartInfo.Environment.Remove(key);
+            }
+            else
+            {
+                process.StartInfo.Environment[key] = value;
+            }
         }
 
         var started = Stopwatch.GetTimestamp();

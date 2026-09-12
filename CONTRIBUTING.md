@@ -17,7 +17,7 @@ pwsh -NoProfile -File scripts/security-audit.ps1
 dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build --no-restore --include-symbols --p:SymbolPackageFormat=snupkg --output artifacts/packages
 pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.0
 pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
-pwsh -NoProfile -File scripts/technical-validation-gate.ps1 -PreviewCandidate '11.0.100-preview.7.26381.103' -RealRepositoryPath $PWD
+pwsh -NoProfile -File scripts/validation-corpus.ps1 -PreviewCandidate '11.0.100-preview.7.26381.103' -RealRepositoryPath $PWD
 ```
 
 The release workflow uses the same SDK and controlled restore. It is tag-gated and must not be run as part of ordinary development.

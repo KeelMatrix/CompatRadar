@@ -273,7 +273,7 @@ public sealed class ConfigurationTests
             var configPath = Path.Combine(copy, "NuGet.Config");
             var configText = File.ReadAllText(configPath).Replace(
                 "</configuration>",
-                "<packageSourceMapping><clear /><packageSource key=\"fixture\"><package pattern=\"CompatRadar.TestDependency\" /></packageSource></packageSourceMapping></configuration>",
+                "<packageSourceMapping><clear /><packageSource key=\"fixture\"><package pattern=\"CompatRadar.FixtureDependency\" /></packageSource></packageSourceMapping></configuration>",
                 StringComparison.Ordinal);
             File.WriteAllText(configPath, configText);
             var projectPath = Path.Combine(copy, "Fixture.csproj");
@@ -291,7 +291,7 @@ public sealed class ConfigurationTests
             var restore = await ProcessRunner.RunAsync(
                 new ParsedCommand("dotnet", ["restore", "Fixture.csproj", "--configfile", "NuGet.Config", "--packages", packages, "--no-cache", "--nologo"]),
                 copy,
-                new Dictionary<string, string>
+                new Dictionary<string, string?>
                 {
                     ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
                     ["KEELMATRIX_NO_TELEMETRY"] = "1"
@@ -300,7 +300,7 @@ public sealed class ConfigurationTests
 
             Assert.True(restore.ExitCode == 0, restore.NormalizedSignature);
             Assert.True(File.Exists(Path.Combine(packages, "newtonsoft.json", "13.0.3", "newtonsoft.json.13.0.3.nupkg")));
-            Assert.True(Directory.Exists(Path.Combine(packages, "compatradar.testdependency", "1.0.0")));
+            Assert.True(Directory.Exists(Path.Combine(packages, "compatradar.fixturedependency", "1.0.0")));
         }
         finally
         {

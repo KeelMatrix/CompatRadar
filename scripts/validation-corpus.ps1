@@ -1,12 +1,17 @@
 [CmdletBinding()]
 param(
-    [string] $OutputPath = 'artifacts/technical-validation-gate.md',
+    [string] $OutputPath = 'artifacts/validation-corpus.md',
     [string[]] $RealRepositoryPath = @(),
     [string[]] $PreviewCandidate = @(),
-    [string] $CorpusManifestPath = 'scripts/technical-validation-corpus.json',
-    [string] $BlindJudgeOutputPath = 'artifacts/technical-validation-blind-judge',
-    [string] $GroundTruthKeyPath = 'scripts/technical-validation-ground-truth.json'
+    [string] $CorpusManifestPath = 'scripts/validation-corpus.json',
+    [string] $WitnessPackOutputPath = 'artifacts/validation-witness-pack'
 )
+
+# Produces reproducible evidence for the pinned validation corpus: it restores and builds the
+# solution, runs the deterministic regression corpus, recomputes detection metrics from the
+# classifications those tests actually observed, probes the pinned repositories with real
+# prerelease candidates when the environment provides them, and writes an unlabeled witness pack
+# for an independent reviewer. The script never asserts an independent review outcome.
 
 $ErrorActionPreference = 'Stop'
 $env:KEELMATRIX_NO_TELEMETRY = '1'
@@ -15,13 +20,14 @@ $stopwatch = [Diagnostics.Stopwatch]::StartNew()
 $environmentLimits = [Collections.Generic.List[object]]::new()
 $feedTestName = 'CandidateFeedRestoresWatchedPackageWhileNormalSourceRemainsAvailable'
 $additiveFeedStatus = 'NOT_RUN'
-$blindJudgeStatus = 'NOT_RUN'
-$blindJudgeAssessment = $null
-$groundTruthKey = $null
-$groundTruthObserved = $null
+$witnessPackStatus = 'NOT_RUN'
+$witnessPackValidation = $null
+$observedOutcomes = @{}
+$observedOutcomeLines = 0
 $deterministicTestFailure = $false
 $deterministicFailureEvidence = ''
 $testResultsDirectory = Join-Path ([IO.Path]::GetTempPath()) ('compat-radar-test-results-' + [guid]::NewGuid().ToString('N'))
+$observedOutcomesPath = Join-Path ([IO.Path]::GetTempPath()) ('compat-radar-observed-outcomes-' + [guid]::NewGuid().ToString('N') + '.jsonl')
 
 function Test-ExternalFeedUnavailable {
     param([string] $Output)
@@ -65,6 +71,27 @@ function Read-TestOutcomes {
     return $outcomes
 }
 
+function Read-ObservedOutcomes {
+    param([string] $Path)
+
+    $observed = @{}
+    if (-not (Test-Path -LiteralPath $Path)) { return $observed }
+    foreach ($line in @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try {
+            $record = $line | ConvertFrom-Json
+            $caseId = [string]$record.case
+            if ([string]::IsNullOrWhiteSpace($caseId)) { continue }
+            if (-not $observed.ContainsKey($caseId)) { $observed[$caseId] = [Collections.Generic.List[string]]::new() }
+            $observed[$caseId].Add([string]$record.classification)
+        }
+        catch {
+            throw "Observed-outcome record is not valid JSON: $line"
+        }
+    }
+    return $observed
+}
+
 function Copy-SafeRepository {
     param([string] $Source, [string] $Destination)
 
@@ -103,7 +130,7 @@ function Invoke-RealRepositoryProbe {
         [string] $ScratchRoot,
         [string] $SdkCandidate,
         [string] $RuntimeCandidate,
-        [string] $BlindJudgeRoot,
+        [string] $WitnessPackRoot,
         [int] $SampleNumber
     )
 
@@ -150,17 +177,17 @@ function Invoke-RealRepositoryProbe {
 {
   "version": 1,
   "control": { "sdk": "current" },
-  "watch": [{ "id": "runtime-preview-gate", "kind": "runtime-preview", "candidates": ["$RuntimeCandidate"] }],
+  "watch": [{ "id": "runtime-preview-corpus", "kind": "runtime-preview", "candidates": ["$RuntimeCandidate"] }],
   "validation": { "command": "dotnet test \"$relativeTarget\" --nologo", "workingDirectory": ".", "timeoutSeconds": 900 },
   "policy": { "confirmationRuns": 1 }
 }
 "@
     Set-Content -LiteralPath $config -Value $configText -Encoding utf8
-    $report = Join-Path $copy 'technical-validation-report.json'
+    $report = Join-Path $copy 'compat-radar-report.json'
     $started = [Diagnostics.Stopwatch]::StartNew()
     Push-Location -LiteralPath $copy
     try {
-        & dotnet $ToolDll check --config compat-radar.json --format json --report technical-validation-report.json 2>&1 | Out-Host
+        & dotnet $ToolDll check --config compat-radar.json --format json --report compat-radar-report.json 2>&1 | Out-Host
         $status = $LASTEXITCODE
     }
     finally { Pop-Location }
@@ -172,8 +199,12 @@ function Invoke-RealRepositoryProbe {
             $reportObject = Get-Content -Raw -LiteralPath $report | ConvertFrom-Json
             $classification = [string]$reportObject.watches[0].comparisons[0].classification
 
-            if (-not [string]::IsNullOrWhiteSpace($BlindJudgeRoot)) {
-                New-Item -ItemType Directory -Force -Path $BlindJudgeRoot | Out-Null
+            if (-not [string]::IsNullOrWhiteSpace($WitnessPackRoot)) {
+                New-Item -ItemType Directory -Force -Path $WitnessPackRoot | Out-Null
+
+                # The witness pack intentionally omits classifications, expectations, and every
+                # other label so a reviewer can judge attribution and reproduction usefulness
+                # without knowing which outcome was seeded for the sample.
                 $witnesses = @($reportObject.watches | ForEach-Object { $_.comparisons } | ForEach-Object {
                     $comparison = $_
                     $witness = $comparison.witness
@@ -184,13 +215,11 @@ function Invoke-RealRepositoryProbe {
                     }
                     $candidateAttempts = @(Convert-RunAttempts @($witness.candidateAttempts))
                     $stableAttempts = @(Convert-RunAttempts @($witness.stableAttempts))
-                    $attempt = $candidateAttempts | Select-Object -First 1
                     [ordered]@{
                         candidate = [string]$comparison.candidate
-                        exitCode = if ($null -eq $attempt) { 2 } else { [int]$attempt.exitCode }
-                        summary = if ([string]::IsNullOrWhiteSpace([string]$comparison.candidateResult.summary)) { 'no diagnostic observed' } else { [string]$comparison.candidateResult.summary }
                         repositoryIdentity = if ([string]::IsNullOrWhiteSpace($repositoryIdentity) -or $repositoryIdentity -eq 'unavailable') { $reportIdentity } else { $repositoryIdentity }
                         repositoryRevision = if ($sourceRevision -match '^[0-9a-fA-F]{40}$') { $sourceRevision } else { [string]$witness.repositoryRevision }
+                        repositoryContentHash = [string]$witness.repositoryContentHash
                         controlConfiguration = [string]$witness.controlConfiguration
                         candidateInputConfiguration = [string]$witness.candidateInputConfiguration
                         sdk = [string]$witness.sdk
@@ -200,9 +229,6 @@ function Invoke-RealRepositoryProbe {
                         focusedFailingTest = if ([string]::IsNullOrWhiteSpace([string]$witness.focusedFailure)) { 'unavailable' } else { [string]$witness.focusedFailure }
                         reproductionCommand = [string]$witness.validationCommand
                         reproductionConfiguration = $reportConfiguration
-                        normalizedFailureSignature = if ([string]::IsNullOrWhiteSpace([string]$witness.normalizedFailureSignature)) { 'no-failure-observed' } else { [string]$witness.normalizedFailureSignature }
-                        fingerprint = if ([string]::IsNullOrWhiteSpace([string]$witness.fingerprint)) { 'no-failure-observed' } else { [string]$witness.fingerprint }
-                        reproductionHint = [string]$witness.reproductionHint
                     }
                 })
                 $sample = [ordered]@{
@@ -210,7 +236,7 @@ function Invoke-RealRepositoryProbe {
                     sampleId = 'sample-{0:d3}' -f $SampleNumber
                     witnesses = $witnesses
                 }
-                ($sample | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath (Join-Path $BlindJudgeRoot ('sample-{0:d3}.json' -f $SampleNumber)) -Encoding utf8
+                ($sample | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath (Join-Path $WitnessPackRoot ('sample-{0:d3}.json' -f $SampleNumber)) -Encoding utf8
             }
         }
         catch { $classification = 'INCONCLUSIVE_EXECUTION' }
@@ -230,17 +256,17 @@ function Invoke-RealRepositoryProbe {
 $restoreOutput = (& dotnet restore KeelMatrix.CompatRadar.sln --configfile NuGet.config 2>&1 | Out-String)
 $restoreStatus = $LASTEXITCODE
 $restoreSeconds = $stopwatch.Elapsed.TotalSeconds
-if ($restoreStatus -ne 0) { throw "Technical gate restore failed with exit code $restoreStatus.`n$restoreOutput" }
+if ($restoreStatus -ne 0) { throw "Validation corpus restore failed with exit code $restoreStatus.`n$restoreOutput" }
 
 $stopwatch.Restart()
 $buildOutput = (& dotnet build KeelMatrix.CompatRadar.sln -c Release --no-restore -warnaserror 2>&1 | Out-String)
 $buildStatus = $LASTEXITCODE
 $buildSeconds = $stopwatch.Elapsed.TotalSeconds
-if ($buildStatus -ne 0) { throw "Technical gate Release build failed with exit code $buildStatus.`n$buildOutput" }
+if ($buildStatus -ne 0) { throw "Validation corpus Release build failed with exit code $buildStatus.`n$buildOutput" }
 
-$gateChecks = @(
+$namedChecks = @(
     [ordered]@{ name = 'StableAndIdenticalCandidateAreCompatibleAndDoNotMutateWorktree'; outcome = 'PASS'; result = 'COMPATIBLE; active worktree unchanged' },
-    [ordered]@{ name = 'ReproducibleCandidateFailureIsFutureRegression'; outcome = 'PASS'; result = 'FUTURE_REGRESSION' },
+    [ordered]@{ name = 'ReproducibleCandidateFailureIsFutureRegression'; outcome = 'PASS'; result = 'FUTURE_REGRESSION from a removed dependency API' },
     [ordered]@{ name = 'DifferentCandidateFailuresAreInconclusiveRatherThanFutureRegression'; outcome = 'PASS'; result = 'INCONCLUSIVE_FLAKY' },
     [ordered]@{ name = 'DifferentStableFailuresRemainBaselineInconclusive'; outcome = 'PASS'; result = 'INCONCLUSIVE_BASELINE_FAILED' },
     [ordered]@{ name = 'DifferentExitCodesWithoutDiagnosticsAreInconclusive'; outcome = 'PASS'; result = 'INCONCLUSIVE_FLAKY' },
@@ -248,75 +274,64 @@ $gateChecks = @(
     [ordered]@{ name = 'NonMonotonicSequenceDoesNotClaimFirstBad'; outcome = 'PASS'; result = 'observed failing candidates; no first-bad claim' },
     [ordered]@{ name = 'FlakyCandidateIsInconclusive'; outcome = 'PASS'; result = 'INCONCLUSIVE_FLAKY' },
     [ordered]@{ name = 'MissingRuntimeCandidateIsUnsupported'; outcome = 'PASS'; result = 'UNSUPPORTED' },
-    [ordered]@{ name = 'InstalledRuntimePreviewIsSelectedIndependentlyOfTheSdk'; outcome = 'PASS'; result = 'COMPATIBLE; exact runtime selected independently of SDK' },
-    [ordered]@{ name = 'InstalledRuntimePreviewCanProduceAConfirmedFutureRegression'; outcome = 'PASS'; result = 'FUTURE_REGRESSION; exact runtime selected independently of SDK' },
+    [ordered]@{ name = 'InstalledRuntimePreviewIsSelectedIndependentlyOfTheSdk'; outcome = 'PASS'; result = 'COMPATIBLE; exact runtime selected independently of the SDK' },
+    [ordered]@{ name = 'InstalledRuntimePreviewCanProduceAConfirmedFutureRegression'; outcome = 'PASS'; result = 'FUTURE_REGRESSION; runtime contract violated by the candidate runtime' },
+    [ordered]@{ name = 'InstalledSdkCandidateCanProduceAConfirmedFutureRegression'; outcome = 'PASS'; result = 'FUTURE_REGRESSION; SDK contract violated by the candidate SDK' },
+    [ordered]@{ name = 'WitnessRecordsTheTestedContentIdentityForADirtyWorktree'; outcome = 'PASS'; result = 'witness records the materialized content identity' },
+    [ordered]@{ name = 'ComparisonEnvironmentDoesNotDescribeTheWatchedCandidate'; outcome = 'PASS'; result = 'comparison environment carries no candidate signaling' },
     [ordered]@{ name = 'CandidateFeedRestoresWatchedPackageWhileNormalSourceRemainsAvailable'; outcome = 'PASS'; result = 'additive feed available alongside normal source' }
 )
-$requiredTests = @($gateChecks | ForEach-Object { $_.name })
+$requiredTests = @($namedChecks | ForEach-Object { $_.name })
 $listed = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --list-tests 2>&1 | Out-String)
 $missing = @($requiredTests | Where-Object { $listed -notmatch [regex]::Escape($_) })
-if ($missing.Count -gt 0) { throw "Technical gate tests are missing: $($missing -join ', ')" }
+if ($missing.Count -gt 0) { throw "Validation corpus tests are missing: $($missing -join ', ')" }
 
 $manifestFile = (Resolve-Path -LiteralPath $CorpusManifestPath -ErrorAction Stop).Path
 try {
     $corpusManifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
 }
 catch {
-    throw "Technical validation corpus manifest is not valid JSON: $manifestFile"
+    throw "Validation corpus manifest is not valid JSON: $manifestFile"
 }
-if ($corpusManifest.schemaVersion -ne 1) { throw 'Technical validation corpus manifest must use schema version 1.' }
+if ($corpusManifest.schemaVersion -ne 1) { throw 'Validation corpus manifest must use schema version 1.' }
 $repositoryDefinitions = @($corpusManifest.repositories)
-if ($repositoryDefinitions.Count -lt 5) { throw 'The Phase 0 corpus must contain several repositories with different complexity profiles.' }
+if ($repositoryDefinitions.Count -lt 5) { throw 'The validation corpus must contain several repositories with different complexity profiles.' }
 if (@($repositoryDefinitions | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ref) -or [string]$_.ref -notmatch '^[0-9a-f]{40}$' }).Count -gt 0) {
-    throw 'Every technical validation corpus repository must be pinned to a full commit SHA.'
+    throw 'Every validation corpus repository must be pinned to a full commit SHA.'
 }
 $manifestCandidates = @($corpusManifest.previewCandidates)
-if ($manifestCandidates.Count -lt 2) { throw 'The Phase 0 corpus must exercise several real prerelease candidates.' }
+if ($manifestCandidates.Count -lt 2) { throw 'The validation corpus must exercise several real prerelease candidates.' }
 $manifestCandidateVersions = @($manifestCandidates | ForEach-Object { [string]$_.version })
 if ($PreviewCandidate.Count -gt 0) {
     $missingCandidates = @($manifestCandidateVersions | Where-Object { $PreviewCandidate -notcontains $_ })
     $unexpectedCandidates = @($PreviewCandidate | Where-Object { $manifestCandidateVersions -notcontains $_ })
     if ($missingCandidates.Count -gt 0 -or $unexpectedCandidates.Count -gt 0) {
-        throw 'The requested preview candidates must exactly match the pinned Phase 0 candidate corpus.'
+        throw 'The requested preview candidates must exactly match the pinned candidate corpus.'
     }
 }
-$groundTruthFile = (Resolve-Path -LiteralPath $GroundTruthKeyPath -ErrorAction Stop).Path
-try {
-    $groundTruthKey = Get-Content -LiteralPath $groundTruthFile -Raw | ConvertFrom-Json
-}
-catch {
-    throw "Technical validation ground-truth key is not valid JSON: $groundTruthFile"
-}
-if ($groundTruthKey.schemaVersion -ne 1) { throw 'Technical validation ground-truth key must use schema version 1.' }
-$plantedDefinitions = @($groundTruthKey.deterministicPlantedBreakages)
-$equivalentDefinitions = @($groundTruthKey.equivalentStates)
-if ($plantedDefinitions.Count -eq 0 -or $equivalentDefinitions.Count -eq 0) { throw 'Technical validation ground-truth key must contain planted and equivalent-state cases.' }
-if (@($plantedDefinitions | Where-Object {
-        [string]::IsNullOrWhiteSpace([string]$_.id) -or
-        [string]::IsNullOrWhiteSpace([string]$_.testName) -or
-        [string]$_.expectedClassification -ne 'FUTURE_REGRESSION' -or
-        [int]$_.candidateCount -lt 1
+$expectedOutcomeDefinitions = @($corpusManifest.expectedOutcomes)
+if ($expectedOutcomeDefinitions.Count -eq 0) { throw 'The validation corpus manifest must declare the expected outcome of every recorded case.' }
+if (@($expectedOutcomeDefinitions | Where-Object {
+        [string]::IsNullOrWhiteSpace([string]$_.case) -or
+        [string]$_.expectedClassification -notin @('COMPATIBLE', 'FUTURE_REGRESSION') -or
+        [string]$_.group -notin @('equivalent', 'incompatible')
     }).Count -gt 0) {
-    throw 'Every deterministic planted-breakage key entry must name a test, expect FUTURE_REGRESSION, and include a positive candidate count.'
+    throw 'Every expected outcome must name a case, an observed classification, and an equivalent or incompatible group.'
 }
-if (@($equivalentDefinitions | Where-Object {
-        [string]::IsNullOrWhiteSpace([string]$_.id) -or
-        [string]::IsNullOrWhiteSpace([string]$_.testName) -or
-        [int]$_.expectedFutureRegressionCount -ne 0
-    }).Count -gt 0) {
-    throw 'Every equivalent-state ground-truth entry must name a test and expect zero future regressions.'
+if (@($expectedOutcomeDefinitions | Where-Object { [string]$_.group -eq 'equivalent' }).Count -eq 0) {
+    throw 'The validation corpus must include equivalent-state cases that must never report a future regression.'
 }
-$manifestPathMap = @{}
-foreach ($definition in $repositoryDefinitions) {
-    $manifestPathMap[[string]$definition.name] = [string]$definition.path
+if (@($expectedOutcomeDefinitions | Where-Object { [string]$_.group -eq 'incompatible' }).Count -eq 0) {
+    throw 'The validation corpus must include cases with a genuinely incompatible candidate state.'
 }
+
 $configuredPaths = @($RealRepositoryPath)
 foreach ($configuredPath in $configuredPaths) {
     $configuredFullPath = [IO.Path]::GetFullPath($configuredPath)
     $matches = @($repositoryDefinitions | Where-Object {
         [IO.Path]::GetFullPath((Join-Path (Get-Location) ([string]$_.path))) -eq $configuredFullPath
     })
-    if ($matches.Count -ne 1) { throw "Real repository path '$configuredPath' is not declared by the technical validation corpus manifest." }
+    if ($matches.Count -ne 1) { throw "Real repository path '$configuredPath' is not declared by the validation corpus manifest." }
 }
 $availableRealRepositoryPaths = [Collections.Generic.List[string]]::new()
 foreach ($definition in $repositoryDefinitions) {
@@ -340,8 +355,14 @@ foreach ($definition in $repositoryDefinitions) {
 
 $stopwatch.Restart()
 New-Item -ItemType Directory -Force -Path $testResultsDirectory | Out-Null
-$testOutput = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --logger 'trx;LogFileName=technical-validation.trx' --results-directory $testResultsDirectory 2>&1 | Out-String)
-$testStatus = $LASTEXITCODE
+$env:COMPATRADAR_TEST_OUTCOMES_PATH = $observedOutcomesPath
+try {
+    $testOutput = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --logger 'trx;LogFileName=validation-corpus.trx' --results-directory $testResultsDirectory 2>&1 | Out-String)
+    $testStatus = $LASTEXITCODE
+}
+finally {
+    Remove-Item Env:COMPATRADAR_TEST_OUTCOMES_PATH -ErrorAction SilentlyContinue
+}
 $testSeconds = $stopwatch.Elapsed.TotalSeconds
 if ($testStatus -ne 0) {
     if (Test-ExternalFeedUnavailable $testOutput) {
@@ -349,54 +370,22 @@ if ($testStatus -ne 0) {
         $environmentLimits.Add([pscustomobject]@{
             Kind = 'additive-feed-integration'
             Status = 'not-available'
-            Detail = 'The named additive-feed integration test could not reach its external NuGet source; the remaining test results are retained and this gate is not a pass.'
+            Detail = 'The named additive-feed integration test could not reach its external NuGet source; the remaining test results are retained and this run is not a pass.'
         })
     }
     else {
         $deterministicTestFailure = $true
-        $deterministicFailureEvidence = "The deterministic test corpus failed with exit code $testStatus."
+        $deterministicFailureEvidence = "The deterministic regression corpus failed with exit code $testStatus."
     }
 }
 
 $testOutcomes = Read-TestOutcomes -ResultsDirectory $testResultsDirectory
-$observedCases = [Collections.Generic.List[object]]::new()
-foreach ($definition in $plantedDefinitions) {
-    $observedOutcome = @($testOutcomes.Keys | Where-Object { $_ -eq [string]$definition.testName -or $_ -like "*.$([string]$definition.testName)" }) | Select-Object -First 1
-    $result = if ($null -eq $observedOutcome) { 'NOT_RUN' } else { [string]$testOutcomes[$observedOutcome] }
-    $detected = $result -eq 'Passed'
-    if (-not $detected) { $deterministicTestFailure = $true }
-    $observedCases.Add([ordered]@{
-        id = [string]$definition.id
-        testName = [string]$definition.testName
-        expectedClassification = [string]$definition.expectedClassification
-        candidateCount = [int]$definition.candidateCount
-        observedOutcome = $result
-        detected = $detected
-    })
-}
-$observedEquivalentStates = [Collections.Generic.List[object]]::new()
-foreach ($definition in $equivalentDefinitions) {
-    $observedOutcome = @($testOutcomes.Keys | Where-Object { $_ -eq [string]$definition.testName -or $_ -like "*.$([string]$definition.testName)" }) | Select-Object -First 1
-    $result = if ($null -eq $observedOutcome) { 'NOT_RUN' } else { [string]$testOutcomes[$observedOutcome] }
-    $futureRegressionCount = if ($result -eq 'Passed') { 0 } else { 1 }
-    if ($futureRegressionCount -gt 0) { $deterministicTestFailure = $true }
-    $observedEquivalentStates.Add([ordered]@{
-        id = [string]$definition.id
-        testName = [string]$definition.testName
-        expectedFutureRegressionCount = [int]$definition.expectedFutureRegressionCount
-        observedOutcome = $result
-        observedFutureRegressionCount = $futureRegressionCount
-    })
-}
-$groundTruthObserved = [ordered]@{
-    schemaVersion = 1
-    keyPath = $GroundTruthKeyPath
-    deterministicPlantedBreakages = $observedCases.ToArray()
-    equivalentStates = $observedEquivalentStates.ToArray()
-}
+$observedOutcomes = Read-ObservedOutcomes -Path $observedOutcomesPath
+$observedOutcomeLines = @($observedOutcomes.Values | ForEach-Object { $_ }).Count
 if (Test-Path -LiteralPath $testResultsDirectory) {
     try { Remove-Item -LiteralPath $testResultsDirectory -Recurse -Force } catch { $environmentLimits.Add([pscustomobject]@{ Kind = 'test-results-cleanup'; Status = 'failed'; Detail = 'The temporary test-result directory could not be removed.' }) }
 }
+if (Test-Path -LiteralPath $observedOutcomesPath) { Remove-Item -LiteralPath $observedOutcomesPath -Force -ErrorAction SilentlyContinue }
 
 $stopwatch.Restart()
 $feedTestOutput = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --filter "FullyQualifiedName~$feedTestName" 2>&1 | Out-String)
@@ -410,16 +399,16 @@ elseif (Test-ExternalFeedUnavailable $feedTestOutput) {
         $environmentLimits.Add([pscustomobject]@{
             Kind = 'additive-feed-integration'
             Status = 'not-available'
-            Detail = 'The named additive-feed integration test could not reach its external NuGet source; this gate is not a pass.'
+            Detail = 'The named additive-feed integration test could not reach its external NuGet source; this run is not a pass.'
         })
     }
     $additiveFeedStatus = 'ENVIRONMENT_LIMITED'
 }
 else {
-    throw "Technical gate additive-feed integration test failed with exit code $feedTestStatus.`n$feedTestOutput"
+    throw "Validation corpus additive-feed integration test failed with exit code $feedTestStatus.`n$feedTestOutput"
 }
 
-foreach ($check in $gateChecks) {
+foreach ($check in $namedChecks) {
     $checkName = [string]$check.name
     if ($checkName -eq $feedTestName) {
         $check['outcome'] = if ($additiveFeedStatus -eq 'PASS') { 'PASS' } else { 'NOT_RUN' }
@@ -427,11 +416,47 @@ foreach ($check in $gateChecks) {
         continue
     }
     $matchingTest = @($testOutcomes.Keys | Where-Object { $_ -eq $checkName -or $_ -like "*.$checkName" }) | Select-Object -First 1
-    if ($null -ne $matchingTest -and [string]$testOutcomes[$matchingTest] -ne 'Passed') {
+    if ($null -eq $matchingTest) {
+        $check['outcome'] = 'FAIL'
+        $check['result'] = 'test outcome: NOT_RUN'
+        $deterministicTestFailure = $true
+    }
+    elseif ([string]$testOutcomes[$matchingTest] -ne 'Passed') {
         $check['outcome'] = 'FAIL'
         $check['result'] = "test outcome: $([string]$testOutcomes[$matchingTest])"
     }
 }
+
+$observedOutcomeRecords = [Collections.Generic.List[object]]::new()
+$incompatibleDetected = 0
+$incompatibleTotal = 0
+$equivalentFalseRegressions = 0
+foreach ($definition in $expectedOutcomeDefinitions) {
+    $caseId = [string]$definition.case
+    $expected = [string]$definition.expectedClassification
+    $group = [string]$definition.group
+    $observed = if ($observedOutcomes.ContainsKey($caseId)) { @($observedOutcomes[$caseId]) } else { @() }
+    $observedText = if ($observed.Count -eq 0) { 'NOT_RECORDED' } else { ($observed -join ',') }
+    $matchesExpectation = $observed.Count -gt 0 -and @($observed | Where-Object { $_ -ne $expected }).Count -eq 0
+    if (-not $matchesExpectation) { $deterministicTestFailure = $true }
+    if ($group -eq 'incompatible') {
+        $incompatibleTotal++
+        if ($observed.Count -gt 0 -and @($observed | Where-Object { $_ -eq 'FUTURE_REGRESSION' }).Count -eq $observed.Count) { $incompatibleDetected++ }
+    }
+    if ($group -eq 'equivalent' -and @($observed | Where-Object { $_ -eq 'FUTURE_REGRESSION' }).Count -gt 0) {
+        $equivalentFalseRegressions++
+    }
+    $observedOutcomeRecords.Add([ordered]@{
+        case = $caseId
+        group = $group
+        expectedClassification = $expected
+        observedClassifications = $observed
+        matchesExpectation = $matchesExpectation
+    })
+}
+$detectionRatePercent = if ($incompatibleTotal -eq 0) { 0 } else { [Math]::Round(($incompatibleDetected * 100.0) / $incompatibleTotal, 2) }
+$requiredDetectionRatePercent = 95
+$detectionPasses = -not $deterministicTestFailure -and $detectionRatePercent -ge $requiredDetectionRatePercent -and $equivalentFalseRegressions -eq 0
 
 $sdkVersions = @()
 $runtimeLines = @()
@@ -443,7 +468,7 @@ if ($PreviewCandidate.Count -eq 0) {
     $environmentLimits.Add([pscustomobject]@{
         Kind = 'preview-candidate'
         Status = 'not-available'
-        Detail = 'No -PreviewCandidate values were supplied; the local deterministic corpus ran without a real preview SDK.'
+        Detail = 'No -PreviewCandidate values were supplied; the deterministic corpus ran without a real preview SDK.'
     })
 }
 else {
@@ -477,9 +502,9 @@ else {
 }
 
 $toolDll = (Resolve-Path -LiteralPath 'src/KeelMatrix.CompatRadar/bin/Release/net8.0/KeelMatrix.CompatRadar.dll').Path
-$probeRoot = Join-Path ([IO.Path]::GetTempPath()) ('compat-radar-gate-' + [guid]::NewGuid().ToString('N'))
+$probeRoot = Join-Path ([IO.Path]::GetTempPath()) ('compat-radar-corpus-' + [guid]::NewGuid().ToString('N'))
 $cleanupStatus = 'NOT_RUN'
-$blindJudgeRoot = [IO.Path]::GetFullPath($BlindJudgeOutputPath)
+$witnessPackRoot = [IO.Path]::GetFullPath($WitnessPackOutputPath)
 if ($configuredPaths.Count -eq 0) {
     $environmentLimits.Add([pscustomobject]@{
         Kind = 'real-repository-corpus'
@@ -491,7 +516,7 @@ if ($configuredPaths.Count -eq 0) {
 $realResults = @()
 if ($previewStatus -eq 'available' -and $availableRealRepositoryPaths.Count -gt 0) {
     New-Item -ItemType Directory -Path $probeRoot | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $blindJudgeRoot 'samples') | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $witnessPackRoot 'samples') | Out-Null
 }
 try {
     if ($previewStatus -eq 'available' -and $availableRealRepositoryPaths.Count -gt 0) {
@@ -501,7 +526,7 @@ try {
             foreach ($path in $availableRealRepositoryPaths) {
                 $sampleNumber++
                 $candidateDefinition = @($manifestCandidates | Where-Object { [string]$_.version -eq $candidate }) | Select-Object -First 1
-                $probeResults.Add((Invoke-RealRepositoryProbe -Source $path -ToolDll $toolDll -ScratchRoot $probeRoot -SdkCandidate $candidate -RuntimeCandidate ([string]$candidateDefinition.runtimeVersion) -BlindJudgeRoot (Join-Path $blindJudgeRoot 'samples') -SampleNumber $sampleNumber))
+                $probeResults.Add((Invoke-RealRepositoryProbe -Source $path -ToolDll $toolDll -ScratchRoot $probeRoot -SdkCandidate $candidate -RuntimeCandidate ([string]$candidateDefinition.runtimeVersion) -WitnessPackRoot (Join-Path $witnessPackRoot 'samples') -SampleNumber $sampleNumber))
             }
         }
         $realResults = @($probeResults.ToArray())
@@ -528,25 +553,25 @@ if ($cleanupStatus -eq 'FAIL') {
     $environmentLimits.Add([pscustomobject]@{
         Kind = 'cleanup'
         Status = 'failed'
-        Detail = 'The isolated real-repository probe directory could not be removed.'
+        Detail = 'The isolated repository probe directory could not be removed.'
     })
 }
 if ($realResults.Count -gt 0 -and -not ($realResults.Classification -contains 'COMPATIBLE' -or $realResults.Classification -contains 'FUTURE_REGRESSION')) {
-    throw 'The runtime-preview candidate was not actually evaluated successfully by any real repository probe.'
+    throw 'The runtime-preview candidate was not actually evaluated successfully by any repository probe.'
 }
 if ($realResults.Count -gt 0) {
-    $blindJudgeAssessmentPath = Join-Path $blindJudgeRoot 'assessment.json'
-    & pwsh -NoProfile -File scripts/assess-blind-judge.ps1 -PackPath (Join-Path $blindJudgeRoot 'samples') -OutputPath $blindJudgeAssessmentPath 2>&1 | Out-Host
-    $blindJudgeAssessmentExitCode = $LASTEXITCODE
-    if ($blindJudgeAssessmentExitCode -ne 0) { throw "Independent blind-judge assessment failed with exit code $blindJudgeAssessmentExitCode." }
-    $blindJudgeAssessment = Get-Content -LiteralPath $blindJudgeAssessmentPath -Raw | ConvertFrom-Json
-    $blindJudgeStatus = [string]$blindJudgeAssessment.outcome
+    $structurePath = Join-Path $witnessPackRoot 'structure.json'
+    & pwsh -NoProfile -File scripts/validate-witness-pack.ps1 -PackPath (Join-Path $witnessPackRoot 'samples') -OutputPath $structurePath 2>&1 | Out-Host
+    $structureExitCode = $LASTEXITCODE
+    if ($structureExitCode -ne 0) { throw "Witness-pack structural validation failed with exit code $structureExitCode." }
+    $witnessPackValidation = Get-Content -LiteralPath $structurePath -Raw | ConvertFrom-Json
+    $witnessPackStatus = 'STRUCTURALLY_COMPLETE'
 }
 elseif ($configuredPaths.Count -gt 0) {
     $environmentLimits.Add([pscustomobject]@{
-        Kind = 'blind-judge-pack'
+        Kind = 'witness-pack'
         Status = 'not-run'
-        Detail = 'The unlabeled blind-judge pack was not generated because the pinned prerelease probe prerequisites were unavailable.'
+        Detail = 'The unlabeled witness pack was not generated because the pinned prerelease probe prerequisites were unavailable.'
     })
 }
 
@@ -577,27 +602,8 @@ else {
 }
 $repositoryRevision = (& git rev-parse HEAD 2>$null | Out-String).Trim()
 if ([string]::IsNullOrWhiteSpace($repositoryRevision)) { $repositoryRevision = 'unavailable' }
-$plantedBreakagesTotal = 0
-$plantedBreakagesDetected = 0
-foreach ($case in $observedCases) {
-    $plantedBreakagesTotal += [int]$case['candidateCount']
-    if ([bool]$case['detected']) { $plantedBreakagesDetected += [int]$case['candidateCount'] }
-}
-$detectionRatePercent = if ($plantedBreakagesTotal -eq 0) { 0 } else { [Math]::Round(($plantedBreakagesDetected * 100.0) / $plantedBreakagesTotal, 2) }
-$equivalentStateFutureRegressionCount = 0
-foreach ($case in $observedEquivalentStates) { $equivalentStateFutureRegressionCount += [int]$case['observedFutureRegressionCount'] }
-$requiredDetectionRatePercent = 95
-$computedGoGatePasses = -not $deterministicTestFailure -and $detectionRatePercent -ge $requiredDetectionRatePercent -and $equivalentStateFutureRegressionCount -eq 0
-$groundTruthObserved['metrics'] = [ordered]@{
-    plantedBreakagesDetected = $plantedBreakagesDetected
-    plantedBreakagesTotal = $plantedBreakagesTotal
-    detectionRatePercent = $detectionRatePercent
-    requiredDetectionRatePercent = $requiredDetectionRatePercent
-    equivalentStateFutureRegressionCount = $equivalentStateFutureRegressionCount
-    goGatePasses = $computedGoGatePasses
-}
-$gateStatus = if (-not $computedGoGatePasses) { 'FAILED' } elseif ($environmentLimits.Count -eq 0) { 'PASS' } else { 'ENVIRONMENT_LIMITED' }
-$gateExitCode = if ($gateStatus -eq 'PASS') { 0 } elseif ($gateStatus -eq 'ENVIRONMENT_LIMITED') { 2 } else { 1 }
+$runStatus = if (-not $detectionPasses) { 'FAILED' } elseif ($environmentLimits.Count -eq 0) { 'PASS' } else { 'ENVIRONMENT_LIMITED' }
+$runExitCode = if ($runStatus -eq 'PASS') { 0 } elseif ($runStatus -eq 'ENVIRONMENT_LIMITED') { 2 } else { 1 }
 $environmentLimitEvidence = if ($environmentLimits.Count -eq 0) {
     'None.'
 }
@@ -610,59 +616,88 @@ if (-not [string]::IsNullOrWhiteSpace($deterministicFailureEvidence)) {
 $directory = Split-Path -Parent $OutputPath
 if (-not [string]::IsNullOrWhiteSpace($directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
 $evidence = @'
-# CompatRadar technical-validation gate
+# CompatRadar validation corpus run
 
-Generated by `scripts/technical-validation-gate.ps1` with application and CLI telemetry disabled.
+Generated by `scripts/validation-corpus.ps1` with application and CLI telemetry disabled.
 
-## Gate status
+## Run status
 
 - Status: __STATUS__ (exit code __EXIT__).
 - Repository revision: `__REVISION__`.
 - Environment-limited records: __LIMITS__
 
-## Deterministic corpus
+## Observed compatibility outcomes
 
-- Planted deterministic future-breakage scenarios: __PLANTED_DETECTED__/__PLANTED_TOTAL__ detected (__DETECTION_RATE__%, required >=__REQUIRED_RATE__).
-- Equivalent stable/future state false `FUTURE_REGRESSION` results: __EQUIVALENT_REGRESSIONS__.
-- Additive-feed integration: __FEED_STATUS__ (`CandidateFeedRestoresWatchedPackageWhileNormalSourceRemainsAvailable`) in the Release test suite and named gate check.
+- Incompatible candidate states detected: __DETECTED__/__TOTAL__ (__RATE__%, required >=__REQUIRED_RATE__).
+- Equivalent stable/future states that reported `FUTURE_REGRESSION`: __EQUIVALENT_REGRESSIONS__.
+- Recorded observed classifications: __RECORDED__ from the deterministic regression corpus.
+- Incompatible states are produced by dependency versions that remove the API the repository uses, by a candidate SDK the repository does not support, and by a candidate runtime the repository does not support.
+- Additive-feed integration: __FEED_STATUS__ (`CandidateFeedRestoresWatchedPackageWhileNormalSourceRemainsAvailable`).
 - Stable-control failures: classified `INCONCLUSIVE_BASELINE_FAILED`, including non-deterministic fail-A/fail-B output.
 - Candidate fail-A/fail-B output: classified `INCONCLUSIVE_FLAKY`, never `FUTURE_REGRESSION`.
 - Flaky and non-monotonic sequences: covered by the named regression tests; no unjustified first-bad claim is emitted.
 - Reachable unsupported path: missing SDK/runtime candidate is classified `UNSUPPORTED` with exit code 2.
-- Required evidence categories: deterministic planted breakage, stable control, flaky, monotonic/non-monotonic, additive feed, unsupported preview, runtime, restore cost, cleanup, and blind assessment are recorded in the JSON companion.
 
-## Named gate checks (10)
+## Named checks
 
 __CHECKS__
 
 ## Runtime, restore, and corpus evidence
 
 - SDK: __SDK__.
-- Runtime/build/test elapsed: restore __RESTORE__ seconds; build __BUILD__ seconds; test corpus __TEST__ seconds; additive-feed test __FEED__ seconds.
+- Elapsed time: restore __RESTORE__ seconds; build __BUILD__ seconds; regression corpus __TEST__ seconds; additive-feed test __FEED__ seconds.
 - Runtime-preview candidate: __PREVIEW__
-- Real repository probes: __REAL__
-- Pinned corpus manifest: `scripts/technical-validation-corpus.json` (six repositories, including three external repositories with distinct complexity profiles).
+- Repository probes: __REAL__
+- Pinned corpus manifest: `scripts/validation-corpus.json`.
 - Isolated probe cleanup: __CLEANUP__.
-- Ground-truth key: `__GROUND_TRUTH__` (retained separately from the unlabeled blind pack; counts are computed from observed test results).
-- Every result remains visible in the JSON report.
-- Runtime and restore cost: measured above for the gate host and per real-repository probe.
+- Runtime and restore cost: measured above for this host and per repository probe.
 
-## Report assessment
+## Reviewer pack
 
-The report contract tests verify deterministic JSON, sanitized bounded diagnostics, reproduction witnesses, and round-trip compatibility. The generated unlabeled blind-judge pack is assessed independently by `scripts/assess-blind-judge.ps1`: __BLIND__.
+The repository probes write an unlabeled witness pack under `__WITNESS_PACK__`. `scripts/validate-witness-pack.ps1` checks only structural completeness and that labels are absent; it does not judge attribution or reproduction usefulness and it does not assert an independent review outcome: __WITNESS__.
 
 ## Reproduction
 
 ```powershell
 $env:KEELMATRIX_NO_TELEMETRY = '1'
-pwsh -NoProfile -File scripts/technical-validation-gate.ps1 -OutputPath artifacts/technical-validation-gate.md
+pwsh -NoProfile -File scripts/validation-corpus.ps1 -OutputPath artifacts/validation-corpus.md
 ```
 '@
 $sdkVersion = (& dotnet --version | Out-String).Trim()
-$checkEvidence = ($gateChecks | ForEach-Object { "- $($_.name): $($_.outcome) — $($_.result)." }) -join "`n"
-$blindEvidence = if ($blindJudgeStatus -eq 'PASS') { "PASS ($($blindJudgeAssessment.sampleCount) unlabeled samples; labels and expected outcomes omitted)." } else { "Not run: $blindJudgeStatus." }
-$groundTruthOutputPath = Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($OutputPath))) 'technical-validation-ground-truth.json'
-$evidence = $evidence.Replace('__STATUS__', $gateStatus, [StringComparison]::Ordinal).Replace('__EXIT__', $gateExitCode.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__REVISION__', $repositoryRevision, [StringComparison]::Ordinal).Replace('__LIMITS__', $environmentLimitEvidence, [StringComparison]::Ordinal).Replace('__FEED_STATUS__', $additiveFeedStatus, [StringComparison]::Ordinal).Replace('__CHECKS__', $checkEvidence, [StringComparison]::Ordinal).Replace('__SDK__', $sdkVersion, [StringComparison]::Ordinal).Replace('__RESTORE__', [Math]::Round($restoreSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__BUILD__', [Math]::Round($buildSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__TEST__', [Math]::Round($testSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__FEED__', [Math]::Round($feedTestSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__PREVIEW__', $previewEvidence, [StringComparison]::Ordinal).Replace('__REAL__', $realEvidence, [StringComparison]::Ordinal).Replace('__CLEANUP__', $cleanupStatus, [StringComparison]::Ordinal).Replace('__BLIND__', $blindEvidence, [StringComparison]::Ordinal).Replace('__PLANTED_DETECTED__', $plantedBreakagesDetected.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__PLANTED_TOTAL__', $plantedBreakagesTotal.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__DETECTION_RATE__', $detectionRatePercent.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__REQUIRED_RATE__', $requiredDetectionRatePercent.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__EQUIVALENT_REGRESSIONS__', $equivalentStateFutureRegressionCount.ToString([Globalization.CultureInfo]::InvariantCulture), [StringComparison]::Ordinal).Replace('__GROUND_TRUTH__', $groundTruthOutputPath, [StringComparison]::Ordinal)
+$checkEvidence = ($namedChecks | ForEach-Object { "- $($_.name): $($_.outcome) - $($_.result)." }) -join "`n"
+$witnessEvidence = if ($witnessPackStatus -eq 'STRUCTURALLY_COMPLETE') {
+    "structurally complete for $($witnessPackValidation.sampleCount) unlabeled sample(s); outcomes, expectations, and labels are omitted and an independent review is still required."
+}
+else {
+    "Not run: $witnessPackStatus."
+}
+$replacements = [ordered]@{
+    '__STATUS__' = $runStatus
+    '__EXIT__' = $runExitCode.ToString([Globalization.CultureInfo]::InvariantCulture)
+    '__REVISION__' = $repositoryRevision
+    '__LIMITS__' = $environmentLimitEvidence
+    '__FEED_STATUS__' = $additiveFeedStatus
+    '__CHECKS__' = $checkEvidence
+    '__SDK__' = $sdkVersion
+    '__RESTORE__' = [Math]::Round($restoreSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture)
+    '__BUILD__' = [Math]::Round($buildSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture)
+    '__TEST__' = [Math]::Round($testSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture)
+    '__FEED__' = [Math]::Round($feedTestSeconds, 2).ToString([Globalization.CultureInfo]::InvariantCulture)
+    '__PREVIEW__' = $previewEvidence
+    '__REAL__' = $realEvidence
+    '__CLEANUP__' = $cleanupStatus
+    '__WITNESS__' = $witnessEvidence
+    '__WITNESS_PACK__' = $WitnessPackOutputPath
+    '__DETECTED__' = $incompatibleDetected.ToString([Globalization.CultureInfo]::InvariantCulture)
+    '__TOTAL__' = $incompatibleTotal.ToString([Globalization.CultureInfo]::InvariantCulture)
+    '__RATE__' = $detectionRatePercent.ToString([Globalization.CultureInfo]::InvariantCulture)
+    '__REQUIRED_RATE__' = $requiredDetectionRatePercent.ToString([Globalization.CultureInfo]::InvariantCulture)
+    '__EQUIVALENT_REGRESSIONS__' = $equivalentFalseRegressions.ToString([Globalization.CultureInfo]::InvariantCulture)
+    '__RECORDED__' = $observedOutcomeLines.ToString([Globalization.CultureInfo]::InvariantCulture)
+}
+foreach ($replacement in $replacements.GetEnumerator()) {
+    $evidence = $evidence.Replace($replacement.Key, [string]$replacement.Value, [StringComparison]::Ordinal)
+}
 $evidence | Set-Content -LiteralPath $OutputPath -Encoding utf8
 
 $jsonOutputPath = [IO.Path]::ChangeExtension($OutputPath, '.json')
@@ -673,23 +708,25 @@ $jsonDirectory = Split-Path -Parent $jsonOutputPath
 if (-not [string]::IsNullOrWhiteSpace($jsonDirectory)) { New-Item -ItemType Directory -Force -Path $jsonDirectory | Out-Null }
 $record = [ordered]@{
     schemaVersion = 1
-    status = $gateStatus
-    exitCode = $gateExitCode
+    status = $runStatus
+    exitCode = $runExitCode
     repositoryRevision = $repositoryRevision
-    deterministicCorpus = [ordered]@{
-        plantedBreakagesDetected = $plantedBreakagesDetected
-        plantedBreakagesTotal = $plantedBreakagesTotal
+    observedOutcomes = [ordered]@{
+        incompatibleStatesDetected = $incompatibleDetected
+        incompatibleStatesTotal = $incompatibleTotal
         detectionRatePercent = $detectionRatePercent
         requiredDetectionRatePercent = $requiredDetectionRatePercent
-        equivalentStateFutureRegressionCount = $equivalentStateFutureRegressionCount
-        goGatePasses = $computedGoGatePasses
+        equivalentStateFutureRegressionCount = $equivalentFalseRegressions
+        detectionPasses = $detectionPasses
+        recordedOutcomeCount = $observedOutcomeLines
+        cases = $observedOutcomeRecords
     }
     additiveFeedIntegration = [ordered]@{
         test = $feedTestName
         status = $additiveFeedStatus
         seconds = [Math]::Round($feedTestSeconds, 2)
     }
-    namedChecks = $gateChecks
+    namedChecks = $namedChecks
     preview = [ordered]@{
         candidate = $PreviewCandidate
         status = $previewStatus
@@ -703,7 +740,7 @@ $record = [ordered]@{
         })
         candidateCount = $manifestCandidates.Count
     }
-    realRepositoryProbes = $realResults
+    repositoryProbes = $realResults
     runtimeRestoreAndCleanup = [ordered]@{
         restoreSeconds = [Math]::Round($restoreSeconds, 2)
         buildSeconds = [Math]::Round($buildSeconds, 2)
@@ -711,49 +748,24 @@ $record = [ordered]@{
         additiveFeedSeconds = [Math]::Round($feedTestSeconds, 2)
         cleanupStatus = $cleanupStatus
     }
-    evidenceCoverage = [ordered]@{
-        deterministicPlantedBreakageDetection = "$plantedBreakagesDetected/$plantedBreakagesTotal ($detectionRatePercent%; required >=$requiredDetectionRatePercent%)"
-        stableControlConfirmation = 'PASS'
-        flakyClassification = 'PASS'
-        monotonicHandling = 'PASS'
-        nonMonotonicHandling = 'PASS'
-        additiveFeedBehavior = $additiveFeedStatus
-        unsupportedPreviewBehavior = 'PASS: MissingRuntimeCandidateIsUnsupported'
-        runtime = $previewStatus
-        restoreCost = 'RECORDED'
-        cleanup = $cleanupStatus
-        unlabeledBlindJudgePack = $blindJudgeStatus
-        independentBlindAssessment = if ($null -eq $blindJudgeAssessment) { 'NOT_RUN' } else { [string]$blindJudgeAssessment.outcome }
-    }
-    blindJudge = [ordered]@{
-        status = $blindJudgeStatus
-        outputPath = $BlindJudgeOutputPath
-        assessment = $blindJudgeAssessment
-    }
-    groundTruth = [ordered]@{
-        keyPath = $GroundTruthKeyPath
-        outputPath = $groundTruthOutputPath
-        observed = $groundTruthObserved
+    witnessPack = [ordered]@{
+        status = $witnessPackStatus
+        outputPath = $WitnessPackOutputPath
+        structuralValidation = $witnessPackValidation
+        independentReviewRequired = $true
     }
     environmentLimits = $environmentLimits.ToArray()
 }
-($record | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $jsonOutputPath -Encoding utf8
-$groundTruthRecord = [ordered]@{
-    schemaVersion = 1
-    keyPath = $GroundTruthKeyPath
-    key = $groundTruthKey
-    observed = $groundTruthObserved
-}
-($groundTruthRecord | ConvertTo-Json -Depth 10) | Set-Content -LiteralPath $groundTruthOutputPath -Encoding utf8
+($record | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $jsonOutputPath -Encoding utf8
 
-if ($gateStatus -eq 'PASS') {
-    Write-Output "Technical validation gate passed; evidence written to $OutputPath and $jsonOutputPath."
+if ($runStatus -eq 'PASS') {
+    Write-Output "Validation corpus run passed; evidence written to $OutputPath and $jsonOutputPath."
 }
-elseif ($gateStatus -eq 'FAILED') {
-    Write-Output "Technical validation gate failed closed; evidence written to $OutputPath, $jsonOutputPath, and $groundTruthOutputPath."
-    exit $gateExitCode
+elseif ($runStatus -eq 'FAILED') {
+    Write-Output "Validation corpus run failed closed; evidence written to $OutputPath and $jsonOutputPath."
+    exit $runExitCode
 }
 else {
-    Write-Output "Technical validation gate environment-limited (exit code 2); evidence written to $OutputPath, $jsonOutputPath, and $groundTruthOutputPath."
-    exit $gateExitCode
+    Write-Output "Validation corpus run was environment-limited (exit code 2); evidence written to $OutputPath and $jsonOutputPath."
+    exit $runExitCode
 }

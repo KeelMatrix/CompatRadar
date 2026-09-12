@@ -36,6 +36,8 @@ internal sealed class RadarEngine
     {
         var revision = MaterializationScope.ComputeRepositoryRevision(repositoryRoot);
         var repositoryIdentity = MaterializationScope.ComputeRepositoryIdentity(repositoryRoot, revision);
+        var repositoryContentHash = MaterializationScope.ComputeRepositoryContentHash(repositoryRoot);
+        var repositoryWorktreeDirty = MaterializationScope.HasUncommittedMaterializedChanges(repositoryRoot);
         var executionValidation = ValidateExecution(repositoryRoot, configuration);
         if (!executionValidation.IsValid)
         {
@@ -88,6 +90,8 @@ internal sealed class RadarEngine
                     configurationPath,
                     revision,
                     repositoryIdentity,
+                    repositoryContentHash,
+                    repositoryWorktreeDirty,
                     executionValidation,
                     scope,
                     watch,
@@ -146,6 +150,8 @@ internal sealed class RadarEngine
         string configurationPath,
         string revision,
         string repositoryIdentity,
+        string repositoryContentHash,
+        bool repositoryWorktreeDirty,
         EngineValidationResult executionValidation,
         MaterializationScope scope,
         WatchConfiguration watch,
@@ -230,7 +236,9 @@ internal sealed class RadarEngine
             StableAttempts = stable.Attempts,
             CandidateAttempts = future.Attempts,
             ReproductionConfiguration = SerializeReproductionConfiguration(configuration),
-            RepositoryIdentity = repositoryIdentity
+            RepositoryIdentity = repositoryIdentity,
+            RepositoryContentHash = repositoryContentHash,
+            RepositoryWorktreeDirty = repositoryWorktreeDirty
         };
         return new CandidateComparison(findingId, candidate, classification, candidateEvaluated, stable, future, witness);
     }
@@ -322,7 +330,7 @@ internal sealed class RadarEngine
             var runtimeAvailability = await ProcessRunner.RunAsync(
                 new ParsedCommand(validationCommand.FileName, ["--list-runtimes"]),
                 workingDirectory,
-                BuildEnvironment(materializedRoot, candidate, attempt: 0, runtimeCandidate),
+                BuildComparisonEnvironment(materializedRoot, runtimeCandidate),
                 TimeSpan.FromSeconds(Math.Min(configuration.Validation.TimeoutSeconds, 60)),
                 cancellationToken).ConfigureAwait(false);
             if (runtimeAvailability.ExitCode != 0)
@@ -358,7 +366,7 @@ internal sealed class RadarEngine
             restore = await ProcessRunner.RunAsync(
                 restoreCommandParsed,
                 workingDirectory,
-                BuildEnvironment(materializedRoot, candidate, attempt: 0, runtimeCandidate),
+                BuildComparisonEnvironment(materializedRoot, runtimeCandidate),
                 TimeSpan.FromSeconds(Math.Min(configuration.Validation.TimeoutSeconds, 900)),
                 cancellationToken).ConfigureAwait(false);
             if (restore!.ExitCode != 0)
@@ -381,7 +389,7 @@ internal sealed class RadarEngine
             var result = await ProcessRunner.RunAsync(
                 command!,
                 workingDirectory,
-                BuildEnvironment(materializedRoot, candidate, attempt, runtimeCandidate),
+                BuildComparisonEnvironment(materializedRoot, runtimeCandidate),
                 TimeSpan.FromSeconds(configuration.Validation.TimeoutSeconds),
                 cancellationToken).ConfigureAwait(false);
             attempts.Add(ToAttempt(result));
@@ -464,18 +472,36 @@ internal sealed class RadarEngine
         return new ParsedCommand(validationCommand.FileName, arguments);
     }
 
-    private static Dictionary<string, string> BuildEnvironment(string materializedRoot, string? candidate, int attempt, string? runtimeCandidate)
+    /// <summary>
+    /// Builds the comparison environment for one materialized repository state.
+    /// The returned variables never describe which watched candidate is under test, so a
+    /// validation command cannot observe the comparison through signaling variables. The only
+    /// state-dependent entries are the isolated per-copy package path and, for runtime-preview
+    /// comparisons, the runtime host selection that implements the watched dimension itself.
+    /// </summary>
+    internal static Dictionary<string, string?> BuildComparisonEnvironment(string materializedRoot, string? runtimeCandidate)
     {
-        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        var environment = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["NUGET_PACKAGES"] = Path.Combine(materializedRoot, ".packages"),
             ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
             ["DOTNET_NOLOGO"] = "1",
             ["KEELMATRIX_NO_TELEMETRY"] = "1",
-            ["COMPATRADAR_CANDIDATE"] = candidate is null ? "0" : "1",
-            ["COMPATRADAR_CANDIDATE_VERSION"] = candidate ?? "current",
-            ["COMPATRADAR_ATTEMPT"] = attempt.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            // Stable and candidate states must never share cross-run build state: a reused
+            // MSBuild node or build server keeps task assemblies from the SDK that started it,
+            // which both breaks isolation and can attribute another state's failure to the candidate.
+            ["MSBUILDDISABLENODEREUSE"] = "1",
+            ["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0",
+            ["DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER"] = "1"
         };
+        foreach (var pinned in InheritedBuildToolVariables)
+        {
+            // Inherited build-tool pinning (for example from a caller that was itself started by
+            // MSBuild) would override the SDK/build tools that the watched state selects. A
+            // comparison must resolve them from the materialized state and its global.json.
+            environment[pinned] = null;
+        }
+
         if (runtimeCandidate is not null)
         {
             environment["DOTNET_ROLL_FORWARD"] = "Disable";
@@ -484,6 +510,20 @@ internal sealed class RadarEngine
 
         return environment;
     }
+
+    private static readonly string[] InheritedBuildToolVariables =
+    [
+        "MSBuildSDKsPath",
+        "MSBuildExtensionsPath",
+        "MSBuildExtensionsPath32",
+        "MSBuildExtensionsPath64",
+        "MSBUILD_EXE_PATH",
+        "MSBuildToolsPath",
+        "MSBuildBinPath",
+        "MSBuildToolsVersion",
+        "DOTNET_MSBUILD_SDK_RESOLVER_SDKS_DIR",
+        "DOTNET_MSBUILD_SDK_RESOLVER_CLI_DIR"
+    ];
 
     private static bool IsDotnetCommand(ParsedCommand command)
     {

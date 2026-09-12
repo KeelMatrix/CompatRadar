@@ -332,4 +332,50 @@ public sealed class ReportAndCliTests
             TestFixture.DeleteRepository(root);
         }
     }
+
+    [Fact]
+    public async Task ConsoleDoesNotClaimAFirstBadCandidateForNonMonotonicSequences()
+    {
+        var root = TestFixture.CreateRepository("non-monotonic");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "non-monotonic", "\"1.0.0\", \"1.1.0\", \"2.0.0\"");
+            var output = new StringWriter();
+            var error = new StringWriter();
+
+            var exitCode = await RadarApplication.RunAsync(["check"], root, new RecordingTelemetry(), output, error);
+
+            var text = output.ToString();
+            Assert.Equal(1, exitCode);
+            Assert.DoesNotContain("First confirmed bad candidate", text, StringComparison.Ordinal);
+            Assert.Contains("Observed failing candidate: 1.1.0", text, StringComparison.Ordinal);
+            Assert.Contains("No monotonic first-bad boundary is claimed for this watch channel.", text, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    [Fact]
+    public async Task ConsoleClaimsFirstBadOnceAndLabelsLaterFailuresForMonotonicSequences()
+    {
+        var root = TestFixture.CreateRepository("monotonic");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "monotonic", "\"1.0.0\", \"1.1.0\", \"2.0.0\"");
+            var output = new StringWriter();
+            var error = new StringWriter();
+
+            var exitCode = await RadarApplication.RunAsync(["check"], root, new RecordingTelemetry(), output, error);
+
+            var text = output.ToString();
+            Assert.Equal(1, exitCode);
+            Assert.Contains("First confirmed bad candidate: 1.1.0", text, StringComparison.Ordinal);
+            Assert.Contains("Confirmed failing candidate: 2.0.0", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("First confirmed bad candidate: 2.0.0", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Observed failing candidate: 1.1.0", text, StringComparison.Ordinal);
+            Assert.Equal(1, text.Split("First confirmed bad candidate", StringSplitOptions.None).Length - 1);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
 }
