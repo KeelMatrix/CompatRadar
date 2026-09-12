@@ -104,13 +104,13 @@ For `dotnet build`, `test`, `run`, `pack`, `publish`, and `msbuild` validation c
 Schema version `1` has these fields:
 
 - `control.sdk`: must be `current`; this is the stable control in the current execution environment.
-- `watch`: one or more explicit channels. Each channel has `kind`, `candidates`, and an optional `id`. NuGet channels also require `package` and may specify an HTTP(S) `feed` without embedded credentials. `sdk-preview` candidates are SDK versions selected through isolated `global.json`; `runtime-preview` candidates are exact `Microsoft.NETCore.App` runtime versions selected through the validation command's runtime framework/host options.
+- `watch`: one or more explicit channels. Each channel has `kind`, `candidates`, and an optional `id`. NuGet channels also require `package` and may specify an HTTP(S) `feed` with no user-info, query string, or fragment; an optional feed that could carry a URL credential is rejected in schema `1`. `sdk-preview` candidates are SDK versions selected through isolated `global.json`; `runtime-preview` candidates are exact `Microsoft.NETCore.App` runtime versions selected through the validation command's runtime framework/host options.
 - `validation.command`: an executable plus arguments. Commands are started directly; shell syntax is not evaluated by CompatRadar.
 - `validation.workingDirectory`: a repository-relative directory.
 - `validation.timeoutSeconds`: bounded command timeout from 1 through 86400 seconds.
 - `policy.confirmationRuns`: 1 through 5 attempts for the stable control and each candidate.
 
-Candidate versions must be parseable NuGet-style versions. Duplicate or ambiguous versions fail configuration validation before any command is run. Candidates are ordered deterministically by core version and prerelease precedence. Optional string fields must be strings when present; JSON `null` means omitted, while wrong-typed optional fields (including `feed`) fail configuration validation with exit code `2` before any command runs or report is written.
+Candidate versions are validated, deduplicated, and ordered with NuGet version semantics: SemVer 2 build metadata such as `1.0.0+build.1` is accepted and never changes precedence, prerelease labels compare case-insensitively, and NuGet-normalized equivalents such as `1.0` and `1.0.0` are duplicates. Unparseable or duplicate versions fail configuration validation before any command is run, and the candidate strings you configured are the strings used in every report and reproduction command. Optional string fields must be strings when present; JSON `null` means omitted, while wrong-typed optional fields (including `feed`) fail configuration validation with exit code `2` before any command runs or report is written.
 
 ## Stable control and result states
 
@@ -173,7 +173,7 @@ The wrapper invokes the same `compat-radar check` command, appends the report to
 
 ## Security and privacy
 
-CompatRadar executes the configured repository restore/build/test command and is not a sandbox. Run it only in a trusted local or CI environment. Comparisons use safe temporary directories, do not follow reparse points, do not mutate the active worktree, bound process time and captured output, terminate process trees after timeout/cancellation, reject malformed candidate definitions and wrong-typed optional fields, and sanitize diagnostics. Optional feed URLs with credential-bearing user-info or query parameters are rejected; URL-embedded secrets are unsupported. Use environment-based authentication or a NuGet credential provider for private feeds. Accepted feed URLs and captured diagnostics are never printed with credential values.
+CompatRadar executes the configured repository restore/build/test command and is not a sandbox. Run it only in a trusted local or CI environment. Comparisons use safe temporary directories, do not follow reparse points, do not mutate the active worktree, bound process time and captured output, terminate process trees after timeout/cancellation, reject malformed candidate definitions and wrong-typed optional fields, and sanitize diagnostics. An optional feed URL is accepted only when it has no user-info, query string, or fragment, because a credential can hide under any parameter name or in a fragment and accepted feed URLs are retained in witnesses, reports, console output, and Action summaries. Rejection diagnostics name the watch index only and never echo the rejected value. Use environment-based authentication or a NuGet credential provider for private feeds.
 
 Each comparison environment is built deliberately. CompatRadar never sets a variable that tells the validation command which candidate is under test, and it clears inherited MSBuild SDK/tool-path pinning plus MSBuild node reuse so stable and candidate states cannot share build state or silently resolve a different SDK than the one the watched state selects. The only state-dependent environment entry is the isolated package path; runtime-preview selection is carried by the top-level validation command so nested .NET processes retain their own application configuration.
 
@@ -184,6 +184,8 @@ Telemetry uses `KeelMatrix.Telemetry` only after the first trustworthy stable-ve
 The tool targets `net8.0` and supports Windows, Linux, and macOS operations. Public CI validates the supported Windows, Linux, and macOS operations, including a real installed runtime-preview selection on each OS. The v1 adapters are explicit NuGet prerelease package overrides, SDK preview selection through isolated `global.json`, and runtime preview selection through an exact candidate-only runtime framework/host override. The relevant SDK/runtime must already be installed.
 
 CompatRadar does not manage dependencies, open update pull requests, discover all dependencies, run hosted builds, provide accounts or scheduling, send notifications, support non-.NET ecosystems, generate patches, or guarantee that every future incompatibility will be predicted.
+
+NuGet-compatible version ordering uses the bundled `NuGet.Versioning` library, which is licensed under Apache-2.0 and copyright Microsoft Corporation.
 
 ## Troubleshooting
 

@@ -509,10 +509,34 @@ jobs:
           config: action-fixture/incompatible-sdk.json
           report: action-fixture/failure.json
 
+      - name: Create credential-feed fixture
+        shell: pwsh
+        run: |
+          @'
+          {
+            "version": 1,
+            "control": { "sdk": "current" },
+            "watch": [{ "kind": "nuget-prerelease", "package": "Example.Dependency", "candidates": ["1.0.0"], "feed": "https://feed.example/v3/index.json?tenant=action-feed-credential-value#action-feed-credential-value" }],
+            "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": "action-fixture", "timeoutSeconds": 120 },
+            "policy": { "confirmationRuns": 1 }
+          }
+          '@ | Set-Content action-fixture/credential-feed.json
+
+      - name: Action credential-feed path
+        id: credentialfeed
+        continue-on-error: true
+        uses: ./
+        env:
+          COMPATRADAR_ACTION_SUMMARY: ${{ runner.temp }}/compatradar-action-summary.md
+        with:
+          config: action-fixture/credential-feed.json
+          report: action-fixture/credential-feed-report.json
+
       - name: Assert Action contract
         shell: pwsh
         env:
           REGRESSION_OUTCOME: ${{ steps.regression.outcome }}
+          CREDENTIALFEED_OUTCOME: ${{ steps.credentialfeed.outcome }}
         run: |
           if ($env:REGRESSION_OUTCOME -ne 'failure') { throw "Action failure path did not propagate failure (outcome: $env:REGRESSION_OUTCOME)." }
           $pass = Get-Content action-fixture/pass.json -Raw | ConvertFrom-Json
@@ -520,4 +544,8 @@ jobs:
           if ($pass.exitCode -ne 0) { throw 'Action pass report exit code mismatch.' }
           if ($failure.exitCode -ne 1 -or $failure.findings[0].classification -ne 'FUTURE_REGRESSION') { throw 'Action failure report mismatch.' }
           $summaryPath = Join-Path $env:RUNNER_TEMP 'compatradar-action-summary.md'
-          if (-not (Get-Content $summaryPath -Raw).Contains('CompatRadar report')) { throw 'Action did not append a job summary.' }
+          $summary = Get-Content $summaryPath -Raw
+          if (-not $summary.Contains('CompatRadar report')) { throw 'Action did not append a job summary.' }
+          if ($env:CREDENTIALFEED_OUTCOME -ne 'failure') { throw "Action credential-feed path did not fail closed (outcome: $env:CREDENTIALFEED_OUTCOME)." }
+          if ($summary.Contains('action-feed-credential-value')) { throw 'Action job summary leaked a feed credential.' }
+          if (Test-Path action-fixture/credential-feed-report.json) { throw 'Action credential-feed path wrote a report for a rejected feed.' }

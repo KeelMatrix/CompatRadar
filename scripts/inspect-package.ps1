@@ -55,7 +55,8 @@ function Assert-ExactArchiveEntries($archive, [string] $packageKind) {
             '^tools/net8\.0/any/KeelMatrix\.CompatRadar\.pdb$',
             '^tools/net8\.0/any/KeelMatrix\.CompatRadar\.runtimeconfig\.json$',
             '^tools/net8\.0/any/KeelMatrix\.CompatRadar\.xml$',
-            '^tools/net8\.0/any/KeelMatrix\.Telemetry\.dll$'
+            '^tools/net8\.0/any/KeelMatrix\.Telemetry\.dll$',
+            '^tools/net8\.0/any/NuGet\.Versioning\.dll$'
         )
     } elseif ($packageKind -eq 'snupkg') {
         @(
@@ -115,7 +116,10 @@ try {
     if ($metadata.id -ne $id -or $metadata.version -ne $ExpectedVersion) { throw 'Package ID/version metadata mismatch.' }
     if ($metadata.authors -ne 'KeelMatrix') { throw 'Authors metadata mismatch.' }
     if ($metadata.license.'#text' -ne 'MIT' -or $metadata.license.type -ne 'expression') { throw 'License metadata mismatch.' }
-    if ([string]::IsNullOrWhiteSpace([string]$metadata.description)) { throw 'Description metadata is missing.' }
+    # Copyright and description are approved package metadata. The comparisons are case-sensitive
+    # (-cne) on purpose: a case-mismatched identity or a drifted description is a contract failure.
+    if ($metadata.copyright -cne 'KeelMatrix') { throw 'Copyright metadata mismatch.' }
+    if ($metadata.description -cne 'Test your .NET repository against future SDK/runtime and NuGet candidates, confirm real breakage, and localize the first bad candidate before normal upgrade time.') { throw 'Description metadata mismatch.' }
     foreach ($tag in @('dotnet', 'runtime', 'nuget', 'compatibility', 'regression-testing')) {
         if (-not ([string]$metadata.tags).Split(' ', [StringSplitOptions]::RemoveEmptyEntries).Contains($tag)) { throw "Required package tag '$tag' is missing." }
     }

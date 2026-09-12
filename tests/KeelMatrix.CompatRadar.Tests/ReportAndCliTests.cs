@@ -278,6 +278,72 @@ public sealed class ReportAndCliTests
         finally { TestFixture.DeleteRepository(root); }
     }
 
+    /// <summary>
+    /// A credential can hide under a parameter name this tool cannot recognize, or in a URI
+    /// fragment, so configuration v1 fails closed instead of trying to classify query values. Every
+    /// consumer-visible surface is checked here: console text, JSON output, diagnostics, the saved
+    /// report (which is never written), and <c>reproduce</c>.
+    /// </summary>
+    [Fact]
+    public async Task FeedCredentialsUnderUnrecognizedNamesNeverReachOutputReportsOrReproduce()
+    {
+        const string FeedSecret = "unrecognized-feed-credential-value";
+        var root = TestFixture.CreateRepository("monotonic");
+        try
+        {
+            TestFixture.WriteConfiguration(root, "monotonic", "\"1.1.0\"", confirmationRuns: 1);
+            var configurationPath = Path.Combine(root, "compat-radar.json");
+            File.WriteAllText(configurationPath, File.ReadAllText(configurationPath).Replace(
+                "\"candidates\": [\"1.1.0\"]",
+                $"\"candidates\": [\"1.1.0\"], \"feed\": \"https://feed.example/v3/index.json?tenant={FeedSecret}#{FeedSecret}\"",
+                StringComparison.Ordinal));
+
+            var reportPath = Path.Combine(root, "feed-credential-report.json");
+            var jsonOutput = new StringWriter();
+            var jsonError = new StringWriter();
+            var jsonExitCode = await RadarApplication.RunAsync(
+                ["check", "--format", "json", "--report", Path.GetFileName(reportPath)],
+                root,
+                new RecordingTelemetry(),
+                jsonOutput,
+                jsonError);
+
+            Assert.Equal(2, jsonExitCode);
+            Assert.Contains("no user-info, query string, or fragment", jsonOutput.ToString(), StringComparison.Ordinal);
+            Assert.False(File.Exists(reportPath));
+            AssertSecretAbsent(FeedSecret, jsonOutput.ToString(), jsonError.ToString());
+
+            var textOutput = new StringWriter();
+            var textError = new StringWriter();
+            Assert.Equal(2, await RadarApplication.RunAsync(["check"], root, new RecordingTelemetry(), textOutput, textError));
+            AssertSecretAbsent(FeedSecret, textOutput.ToString(), textError.ToString());
+
+            var validateOutput = new StringWriter();
+            var validateError = new StringWriter();
+            Assert.Equal(2, await RadarApplication.RunAsync(["config", "validate", "--format", "json"], root, new RecordingTelemetry(), validateOutput, validateError));
+            AssertSecretAbsent(FeedSecret, validateOutput.ToString(), validateError.ToString());
+
+            var reproduceOutput = new StringWriter();
+            var reproduceError = new StringWriter();
+            Assert.Equal(2, await RadarApplication.RunAsync(
+                ["reproduce", "package-watch-1.1.0", "--report", Path.GetFileName(reportPath)],
+                root,
+                new RecordingTelemetry(),
+                reproduceOutput,
+                reproduceError));
+            AssertSecretAbsent(FeedSecret, reproduceOutput.ToString(), reproduceError.ToString());
+        }
+        finally { TestFixture.DeleteRepository(root); }
+    }
+
+    private static void AssertSecretAbsent(string secret, params string[] surfaces)
+    {
+        foreach (var surface in surfaces)
+        {
+            Assert.DoesNotContain(secret, surface, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task SecretLikeDiagnosticsNeverLeakIntoConsoleReportSignaturesOrWitness()
     {

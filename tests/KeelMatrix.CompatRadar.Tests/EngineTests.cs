@@ -306,6 +306,46 @@ public sealed class EngineTests
         finally { TestFixture.DeleteRepository(root); }
     }
 
+    /// <summary>
+    /// NuGet compares prerelease labels case-insensitively, so <c>2.0.0-alpha</c> precedes
+    /// <c>2.0.0-Beta</c>. Ordinal string comparison orders those candidates the other way around and
+    /// would report a false monotonic first-bad boundary for a genuinely non-monotonic sequence.
+    /// </summary>
+    [Fact]
+    public async Task MixedCasePrereleaseOrderingDoesNotProduceAFalseFirstBadClaim()
+    {
+        var feed = Path.Combine(Path.GetTempPath(), "compat-radar-tests", "mixed-case-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(feed);
+        TestFixture.CreateDependencyPackage(feed, "1.0.0", removesApi: false);
+        TestFixture.CreateDependencyPackage(feed, "2.0.0-Beta", removesApi: false);
+        TestFixture.CreateDependencyPackage(feed, "2.0.0-alpha", removesApi: true);
+        var root = TestFixture.CreateRepositoryWithFeed("monotonic", feed);
+        try
+        {
+            TestFixture.WriteConfiguration(root, "monotonic", "\"2.0.0-Beta\", \"2.0.0-alpha\"", confirmationRuns: 1);
+            var configuration = ConfigurationLoader.Load(root, "compat-radar.json").Configuration!;
+            var result = await new RadarEngine().AnalyzeAsync(root, configuration, "compat-radar.json", CancellationToken.None);
+            var watch = result.Report.Watches[0];
+
+            // Ordinal comparison would order these candidates the other way around, so the ordering
+            // assertion below is what keeps the first-bad claim honest.
+            Assert.True(string.CompareOrdinal("2.0.0-Beta", "2.0.0-alpha") < 0);
+            Assert.Equal(["2.0.0-alpha", "2.0.0-Beta"], watch.OrderedCandidates);
+            Assert.Equal(ResultClassification.FutureRegression, watch.Comparisons[0].Classification);
+            Assert.Equal(ResultClassification.Compatible, watch.Comparisons[1].Classification);
+            Assert.Null(watch.FirstConfirmedBadCandidate);
+            Assert.Equal(["2.0.0-alpha"], watch.ObservedFailingCandidates);
+            Assert.Equal(1, result.Report.ExitCode);
+            ObservedOutcomes.Record("mixed-case-prerelease-ordering-lower-failure", watch.Comparisons[0].Classification);
+            ObservedOutcomes.Record("mixed-case-prerelease-ordering-upper-pass", watch.Comparisons[1].Classification);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(root);
+            TestFixture.DeleteRepository(feed);
+        }
+    }
+
     [Fact]
     public void SanitizesSecretsAndBoundsDiagnostics()
     {

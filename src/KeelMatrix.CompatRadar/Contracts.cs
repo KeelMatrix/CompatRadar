@@ -56,15 +56,6 @@ internal sealed record ValidationConfiguration(
 
 internal sealed record PolicyConfiguration(int ConfirmationRuns);
 
-internal sealed record CandidateVersion(IReadOnlyList<int> Core, IReadOnlyList<CandidateIdentifier> Prerelease)
-{
-    public override string ToString() => string.Join('.', Core) + (Prerelease.Count == 0
-        ? string.Empty
-        : $"-{string.Join('.', Prerelease.Select(x => x.Value))}");
-}
-
-internal sealed record CandidateIdentifier(string Value, bool IsNumeric, int NumericValue);
-
 internal sealed record CandidateValidationResult(
     bool Accepted,
     IReadOnlyList<string> OrderedCandidates,

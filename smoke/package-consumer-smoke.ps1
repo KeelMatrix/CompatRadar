@@ -278,6 +278,27 @@ Console.WriteLine(SmokeApi.Describe());
         if ($credentialOutput.IndexOf($credentialFeedSecret, [StringComparison]::Ordinal) -ge 0) { throw 'installed package leaked a rejected feed credential' }
         if (Test-Path -LiteralPath (Join-Path $fixture 'credential-feed-report.json')) { throw 'credential-bearing feed validation wrote a report' }
 
+        # Adversarial variant: the credential is hidden under a parameter name the tool cannot
+        # recognize and repeated in a fragment, and the check/reproduce paths are exercised too.
+        $opaqueFeedSecret = 'smoke-opaque-feed-secret-value'
+        $opaqueFeedConfig = Join-Path $fixture 'opaque-feed.json'
+        Set-Content -LiteralPath $opaqueFeedConfig -Value @"
+{
+  "version": 1,
+  "control": { "sdk": "current" },
+  "watch": [{ "kind": "nuget-prerelease", "package": "CompatRadar.SmokeDependency", "candidates": ["1.0.0"], "feed": "https://feed.example/v3/index.json?tenant=$opaqueFeedSecret#$opaqueFeedSecret" }],
+  "validation": { "command": "dotnet run --project Fixture.csproj --no-restore --nologo", "workingDirectory": ".", "timeoutSeconds": 120 },
+  "policy": { "confirmationRuns": 1 }
+}
+"@
+        $opaqueFeedReport = Join-Path $fixture 'opaque-feed-report.json'
+        $opaqueCheckOutput = (& $tool check --config (Split-Path -Leaf $opaqueFeedConfig) --format json --report (Split-Path -Leaf $opaqueFeedReport) 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 2) { throw 'a feed credential under an unrecognized parameter name or in a fragment was accepted by the installed package' }
+        if ($opaqueCheckOutput.IndexOf($opaqueFeedSecret, [StringComparison]::Ordinal) -ge 0) { throw 'installed package leaked a feed credential from an unrecognized parameter name or fragment' }
+        if (Test-Path -LiteralPath $opaqueFeedReport) { throw 'a rejected feed credential still produced a report' }
+        $opaqueReproduceOutput = (& $tool reproduce 'package-watch-1.0.0' --config (Split-Path -Leaf $opaqueFeedConfig) --report (Split-Path -Leaf $opaqueFeedReport) 2>&1 | Out-String)
+        if ($opaqueReproduceOutput.IndexOf($opaqueFeedSecret, [StringComparison]::Ordinal) -ge 0) { throw 'installed package leaked a feed credential through reproduce output' }
+
         $malformedFeedSecret = 'smoke-malformed-feed-secret'
         $malformedFeedUrl = "https://feed.example/v3/index.json?apiKey=$malformedFeedSecret"
         $malformedConfig = Join-Path $fixture 'malformed-feed.json'

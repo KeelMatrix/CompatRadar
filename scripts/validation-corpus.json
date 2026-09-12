@@ -127,6 +127,18 @@
       "group": "incompatible",
       "expectedClassification": "FUTURE_REGRESSION",
       "source": "InstalledSdkCandidateCanProduceAConfirmedFutureRegression"
+    },
+    {
+      "case": "mixed-case-prerelease-ordering-lower-failure",
+      "group": "incompatible",
+      "expectedClassification": "FUTURE_REGRESSION",
+      "source": "MixedCasePrereleaseOrderingDoesNotProduceAFalseFirstBadClaim"
+    },
+    {
+      "case": "mixed-case-prerelease-ordering-upper-pass",
+      "group": "equivalent",
+      "expectedClassification": "COMPATIBLE",
+      "source": "MixedCasePrereleaseOrderingDoesNotProduceAFalseFirstBadClaim"
     }
   ],
   "requiredEvidence": [

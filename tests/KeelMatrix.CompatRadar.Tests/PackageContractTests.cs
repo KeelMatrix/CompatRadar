@@ -5,6 +5,8 @@ namespace KeelMatrix.CompatRadar.Tests;
 
 public sealed class PackageContractTests
 {
+    private const string ApprovedDescription = "Test your .NET repository against future SDK/runtime and NuGet candidates, confirm real breakage, and localize the first bad candidate before normal upgrade time.";
+
     [Fact]
     public void GeneratedPackagePassesExactInspection()
     {
@@ -66,6 +68,75 @@ public sealed class PackageContractTests
         }
     }
 
+    [Theory]
+    [InlineData("<copyright>KeelMatrix</copyright>", "<copyright></copyright>")]
+    [InlineData("<copyright>KeelMatrix</copyright>", "<copyright>Copyright (c) 2026 KeelMatrix</copyright>")]
+    [InlineData("<copyright>KeelMatrix</copyright>", "<copyright>keelmatrix</copyright>")]
+    [InlineData("<copyright>KeelMatrix</copyright>", "<copyright>KEELMATRIX</copyright>")]
+    public void MissingWrongOrCaseMismatchedCopyrightFailsInspection(string search, string replacement)
+    {
+        var packageDirectory = PackToTemporaryDirectory();
+        try
+        {
+            RewriteNuspec(Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg"), search, replacement);
+
+            var result = Inspect(packageDirectory);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("Copyright metadata mismatch", result.Output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(packageDirectory);
+        }
+    }
+
+    [Fact]
+    public void DriftedDescriptionFailsInspection()
+    {
+        var packageDirectory = PackToTemporaryDirectory();
+        try
+        {
+            RewriteNuspec(
+                Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg"),
+                ApprovedDescription,
+                "Test your .NET repository against future SDK and NuGet candidates, confirm real breakage, and localize the first bad candidate before normal upgrade time.");
+
+            var result = Inspect(packageDirectory);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("Description metadata mismatch", result.Output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(packageDirectory);
+        }
+    }
+
+    [Fact]
+    public void PackedMetadataMatchesTheApprovedCopyrightAndDescription()
+    {
+        var packageDirectory = PackToTemporaryDirectory();
+        try
+        {
+            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg");
+            using var archive = ZipFile.OpenRead(packagePath);
+            var nuspec = archive.Entries.Single(entry => entry.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase));
+            using var reader = new StreamReader(nuspec.Open());
+            var xml = System.Xml.Linq.XDocument.Parse(reader.ReadToEnd());
+            var metadata = xml.Root!.Elements().Single(element => element.Name.LocalName == "metadata");
+            var copyright = metadata.Elements().Single(element => element.Name.LocalName == "copyright").Value;
+            var description = metadata.Elements().Single(element => element.Name.LocalName == "description").Value;
+
+            Assert.Equal("KeelMatrix", copyright);
+            Assert.Equal(ApprovedDescription, description);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(packageDirectory);
+        }
+    }
+
     private static void WriteInspectionDiagnostics(string fileName, string packageDirectory, (int ExitCode, string Output) result)
     {
         var directory = Path.Combine(FindRepositoryRoot(), "artifacts", "test-results");
@@ -73,6 +144,45 @@ public sealed class PackageContractTests
         File.WriteAllText(
             Path.Combine(directory, fileName),
             $"exit code: {result.ExitCode}{Environment.NewLine}{Environment.NewLine}package directory: {packageDirectory}{Environment.NewLine}{Environment.NewLine}{result.Output}");
+    }
+
+    /// <summary>
+    /// Rewrites nuspec metadata by rebuilding the archive so a negative package-contract test can
+    /// prove that inspection fails for missing, wrong, or case-mismatched values.
+    /// </summary>
+    private static void RewriteNuspec(string packagePath, string search, string replacement)
+    {
+        var staged = packagePath + ".staged";
+        using (var source = ZipFile.OpenRead(packagePath))
+        using (var target = ZipFile.Open(staged, ZipArchiveMode.Create))
+        {
+            var nuspec = source.Entries.FirstOrDefault(entry => entry.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException("The package nuspec is missing.");
+            foreach (var entry in source.Entries)
+            {
+                var created = target.CreateEntry(entry.FullName, CompressionLevel.Optimal);
+                using var input = entry.Open();
+                using var output = created.Open();
+                if (string.Equals(entry.FullName, nuspec.FullName, StringComparison.Ordinal))
+                {
+                    using var reader = new StreamReader(input);
+                    var text = reader.ReadToEnd();
+                    if (!text.Contains(search, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException($"The nuspec does not contain '{search}'.");
+                    }
+
+                    using var writer = new StreamWriter(output);
+                    writer.Write(text.Replace(search, replacement, StringComparison.Ordinal));
+                }
+                else
+                {
+                    input.CopyTo(output);
+                }
+            }
+        }
+
+        File.Move(staged, packagePath, overwrite: true);
     }
 
     /// <summary>

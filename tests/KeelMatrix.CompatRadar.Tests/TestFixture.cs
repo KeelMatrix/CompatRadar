@@ -34,9 +34,23 @@ internal static class TestFixture
 
     public static string CreateRepository(string behavior)
     {
+        return CreateRepositoryCore(behavior, GetOrCreateFeed(ProfileFor(behavior)));
+    }
+
+    /// <summary>
+    /// Creates a repository whose watched package restores from a caller-owned feed. Tests use this
+    /// to control the exact candidate versions, including prerelease labels with mixed casing, that
+    /// the shared fixture feed does not contain.
+    /// </summary>
+    public static string CreateRepositoryWithFeed(string behavior, string feed)
+    {
+        return CreateRepositoryCore(behavior, feed);
+    }
+
+    private static string CreateRepositoryCore(string behavior, string feed)
+    {
         var root = Path.Combine(Path.GetTempPath(), "compat-radar-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var feed = GetOrCreateFeed(ProfileFor(behavior));
         File.WriteAllText(Path.Combine(root, "NuGet.Config"), $"""
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
@@ -64,6 +78,18 @@ internal static class TestFixture
 """);
         File.WriteAllText(Path.Combine(root, "Program.cs"), BuildProgram(behavior));
         return root;
+    }
+
+    /// <summary>
+    /// Packs one dependency package version into a caller-owned feed. <paramref name="removesApi"/>
+    /// mirrors the fixture profiles: the package stops exposing the API the fixture calls, so a
+    /// candidate that resolves it genuinely fails to build.
+    /// </summary>
+    public static void CreateDependencyPackage(string feed, string version, bool removesApi)
+    {
+        var profileRoot = Path.Combine(Path.GetTempPath(), "compat-radar-tests", "custom-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(profileRoot);
+        BuildDependencyPackage(profileRoot, feed, version, removesApi);
     }
 
     private static string ProfileFor(string behavior) => behavior switch

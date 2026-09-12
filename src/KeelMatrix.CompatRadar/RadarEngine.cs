@@ -122,7 +122,7 @@ internal sealed class RadarEngine
                 ordering.OrderedCandidates,
                 [],
                 true,
-                "Candidates are parsed and sorted by NuGet-style precedence. A first-bad claim is emitted only when every later ordered candidate also fails; non-monotonic evidence reports observed failing candidates instead.",
+                "Candidates are validated, deduplicated, and ordered by NuGet version precedence (build metadata is ignored and prerelease labels are case-insensitive). A first-bad claim is emitted only when every later ordered candidate also fails; non-monotonic evidence reports observed failing candidates instead.",
                 comparisons,
                 firstBad,
                 observedFailures);

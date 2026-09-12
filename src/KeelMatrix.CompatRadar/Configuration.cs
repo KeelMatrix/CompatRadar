@@ -1,7 +1,5 @@
 using System.Text.Json;
 
-using System.Text.RegularExpressions;
-
 namespace KeelMatrix.CompatRadar;
 
 internal sealed record ConfigurationLoadResult(RadarConfiguration? Configuration, IReadOnlyList<string> Errors)
@@ -140,7 +138,7 @@ internal static class ConfigurationLoader
 
             if (feed is not null && !IsSafeFeed(feed))
             {
-                errors.Add($"watch[{index}].feed must be an absolute HTTP(S) URL without embedded credentials.");
+                errors.Add($"watch[{index}].feed must be an absolute HTTP(S) URL with no user-info, query string, or fragment; feed credentials are not supported in configuration v1.");
             }
 
             if (kind == WatchKind.NuGetPrerelease)
@@ -268,38 +266,28 @@ internal static class ConfigurationLoader
         return result.Count == candidates.GetArrayLength() ? result : null;
     }
 
+    /// <summary>
+    /// Accepted feed URLs are retained verbatim in witnesses, JSON reports, console output, and
+    /// Action summaries, and any query value, fragment, or user-info component can carry a
+    /// credential under a name this tool cannot recognize. Configuration v1 therefore accepts only
+    /// the form that cannot carry one: an absolute HTTP(S) URL with no user-info, query string, or
+    /// fragment. A rejected feed is reported by index only, so the rejected value is never echoed.
+    /// Credential-bearing feeds belong in environment-based authentication or a NuGet credential
+    /// provider.
+    /// </summary>
     private static bool IsSafeFeed(string value)
     {
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
-            || (!uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) && !uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-            || !string.IsNullOrEmpty(uri.UserInfo))
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
         {
             return false;
         }
 
-        return uri.Query
-            .TrimStart('?')
-            .Split('&', StringSplitOptions.RemoveEmptyEntries)
-            .Select(parameter => parameter.Split('=', 2)[0])
-            .Select(parameter => Uri.UnescapeDataString(parameter))
-            .All(parameter => !IsCredentialQueryName(parameter));
-    }
-
-    private static bool IsCredentialQueryName(string value)
-    {
-        var camelSeparated = Regex.Replace(value, "([a-z0-9])([A-Z])", "$1_$2", RegexOptions.CultureInvariant);
-        var normalized = new string(camelSeparated.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
-        if (normalized is "key" or "apikey" or "token" or "secret" or "password" or "credential" or "credentials" or "sig" or "signature" or "auth" or "authorization" or "connectionstring")
-        {
-            return true;
-        }
-
-        var parts = Regex.Split(camelSeparated, "[^A-Za-z0-9]+", RegexOptions.CultureInvariant)
-            .Where(part => part.Length > 0)
-            .Select(part => part.ToLowerInvariant())
-            .ToArray();
-        return parts.Any(part => part is "key" or "token" or "secret" or "password" or "credential" or "credentials" or "sig" or "signature" or "auth" or "authorization")
-            || (parts.Contains("connection", StringComparer.Ordinal) && parts.Contains("string", StringComparer.Ordinal));
+        var isHttpScheme = uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            || uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        return isHttpScheme
+            && string.IsNullOrEmpty(uri.UserInfo)
+            && string.IsNullOrEmpty(uri.Query)
+            && string.IsNullOrEmpty(uri.Fragment);
     }
 
     private static void RejectUnknown(JsonElement element, HashSet<string> allowed, string context, List<string> errors)
