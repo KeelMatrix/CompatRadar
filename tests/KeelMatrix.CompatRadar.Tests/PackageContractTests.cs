@@ -58,7 +58,7 @@ public sealed class PackageContractTests
 
             Assert.NotEqual(0, result.ExitCode);
             WriteInspectionDiagnostics("package-readme-link-inspection.txt", packageDirectory, result);
-            Assert.Contains("does not resolve to an entry in the package", result.Output, StringComparison.Ordinal);
+            Assert.Contains("Package README link is unresolved", result.Output, StringComparison.Ordinal);
         }
         finally
         {

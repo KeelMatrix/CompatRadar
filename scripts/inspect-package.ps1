@@ -94,7 +94,8 @@ function Assert-PackageReadmeLinks {
         if ($normalized.Length -eq 0) { continue }
         $resolved = @($archive.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq $normalized })
         if ($resolved.Count -eq 0) {
-            throw "Package README link '$target' does not resolve to an entry in the package. Use an absolute URL for content that is not packed."
+            # Keep this message short: a wrapped console line would break substring checks.
+            throw "Package README link is unresolved: $target"
         }
     }
 }
