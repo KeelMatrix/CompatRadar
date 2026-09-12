@@ -577,7 +577,7 @@ elseif ($configuredPaths.Count -gt 0) {
 
 $realEvidence = if ($realResults.Count -gt 0) {
     ($realResults | ForEach-Object {
-        "$($_.Name) @ $($_.Revision): $($_.Classification), exit $($_.ExitCode), $($_.Seconds)s, candidate $($_.Candidate)."
+        "$($_.Name) @ $($_.Revision): $($_.Classification), exit $($_.ExitCode), $($_.Seconds)s, runtime candidate $($_.RuntimeCandidate)."
     }) -join ' '
 }
 elseif ($availableRealRepositoryPaths.Count -gt 0) {
