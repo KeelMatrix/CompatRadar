@@ -83,11 +83,14 @@ internal static class TestFixture
     /// <summary>
     /// Packs one dependency package version into a caller-owned feed. <paramref name="removesApi"/>
     /// mirrors the fixture profiles: the package stops exposing the API the fixture calls, so a
-    /// candidate that resolves it genuinely fails to build.
+    /// candidate that resolves it genuinely fails to build. Build scratch state lives beside the
+    /// feed, so a caller that removes its temporary feed root removes this state too.
     /// </summary>
     public static void CreateDependencyPackage(string feed, string version, bool removesApi)
     {
-        var profileRoot = Path.Combine(Path.GetTempPath(), "compat-radar-tests", "custom-" + Guid.NewGuid().ToString("N"));
+        var feedRoot = Directory.GetParent(Path.GetFullPath(feed))?.FullName
+            ?? throw new InvalidOperationException("The dependency feed needs an owning temporary directory.");
+        var profileRoot = Path.Combine(feedRoot, "build-scratch");
         Directory.CreateDirectory(profileRoot);
         BuildDependencyPackage(profileRoot, feed, version, removesApi);
     }

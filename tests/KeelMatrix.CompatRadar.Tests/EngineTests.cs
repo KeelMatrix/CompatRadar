@@ -314,7 +314,8 @@ public sealed class EngineTests
     [Fact]
     public async Task MixedCasePrereleaseOrderingDoesNotProduceAFalseFirstBadClaim()
     {
-        var feed = Path.Combine(Path.GetTempPath(), "compat-radar-tests", "mixed-case-" + Guid.NewGuid().ToString("N"));
+        var feedRoot = Path.Combine(Path.GetTempPath(), "compat-radar-tests", "mixed-case-" + Guid.NewGuid().ToString("N"));
+        var feed = Path.Combine(feedRoot, "feed");
         Directory.CreateDirectory(feed);
         TestFixture.CreateDependencyPackage(feed, "1.0.0", removesApi: false);
         TestFixture.CreateDependencyPackage(feed, "2.0.0-Beta", removesApi: false);
@@ -342,7 +343,7 @@ public sealed class EngineTests
         finally
         {
             TestFixture.DeleteRepository(root);
-            TestFixture.DeleteRepository(feed);
+            TestFixture.DeleteRepository(feedRoot);
         }
     }
 
