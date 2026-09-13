@@ -6,20 +6,34 @@ CompatRadar is a local-first .NET tool. It compares an explicitly selected NuGet
 
 ## Install
 
-```bash
-dotnet tool install --global KeelMatrix.CompatRadar --version 0.1.0
+CompatRadar is not yet published to NuGet.org, and the first public release tag does not exist. The following is a local-package path for trying the unreleased source; it is not a public NuGet installation.
+
+From the repository root, pack and install the local package:
+
+```powershell
+dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --output artifacts/packages
+dotnet tool install --global --add-source ./artifacts/packages --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.0 --no-cache
 ```
 
-Update or remove it with:
+If that local version is already installed, update it with:
 
-```bash
-dotnet tool update --global KeelMatrix.CompatRadar --version 0.1.0
+```powershell
+dotnet tool update --global --add-source ./artifacts/packages --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.0 --no-cache
+```
+
+Remove the local tool with:
+
+```powershell
 dotnet tool uninstall --global KeelMatrix.CompatRadar
 ```
 
+For repository development and release validation, use the [contributor guide](https://github.com/KeelMatrix/CompatRadar/blob/main/CONTRIBUTING.md#development).
+
 ## Quick Start
 
-The following five-minute example checks an explicitly selected NuGet prerelease.
+The following five-minute template checks an explicitly selected NuGet prerelease.
+
+Before running it, replace `Example.Dependency` and both candidate versions with a package and prerelease sequence that your repository already references and your configured feed actually provides. This repository is one concrete example: `NuGet.Versioning` is referenced by `src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj` and pinned to `7.9.0` in `Directory.Packages.props`. If you monitor that package, select its available prerelease candidates from the configured feed; if it has no suitable prerelease, choose another package already declared by your repository. The commands below are intended to run after those watch values are replaced.
 
 Create `compat-radar.json` in the repository root:
 
@@ -44,7 +58,7 @@ Create `compat-radar.json` in the repository root:
 }
 ```
 
-Run it:
+After replacing the watch values, run it:
 
 ```bash
 compat-radar config validate
@@ -157,19 +171,7 @@ Use `--format json` for CI and `--report <path>` to write an artifact explicitly
 
 ## GitHub Action
 
-The repository includes a composite Action wrapper. Install the tool in the job, then call the local Action. For a tagged release, consumers can use the immutable release tag:
-
-```yaml
-- name: Install CompatRadar
-  shell: bash
-  run: dotnet tool install --global KeelMatrix.CompatRadar --version 0.1.0
-
-- name: Check future compatibility
-  uses: KeelMatrix/CompatRadar@v0.1.0
-  with:
-    config: compat-radar.json
-    report: artifacts/compat-radar-report.json
-```
+The repository includes a composite Action wrapper. It is not yet a public consumer path because no matching package and release tag exist, so this README intentionally defers a tagged `uses:` example. Maintainers can validate the packaged tool and Action wrapper through the [contributor guide](https://github.com/KeelMatrix/CompatRadar/blob/main/CONTRIBUTING.md#development).
 
 The wrapper invokes the same `compat-radar check` command, appends the report to `GITHUB_STEP_SUMMARY`, and emits a workflow error annotation for exit code `1`. No hosted dashboard is required. The repository CI workflow validates the supported Windows, Linux, and macOS operations, the packed-tool consumer path, and the Action failure path.
 

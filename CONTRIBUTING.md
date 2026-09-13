@@ -9,6 +9,7 @@ Thank you for helping improve CompatRadar.
 - `action.yml` and `scripts/` contain the GitHub Action wrapper and repository validation scripts.
 - `smoke/` contains the isolated package-consumer smoke script.
 - `artifacts/` is disposable local build and package output and is ignored by Git.
+- Optional local commit checks are documented in [.githooks/README.md](.githooks/README.md).
 
 ## Before you begin
 
@@ -42,6 +43,8 @@ The [validation corpus guide](docs/validation-corpus.md) describes the optional 
 The release workflow uses the same SDK and controlled restore. It is tag-gated and must not be run as part of ordinary development.
 
 Keep changes focused, add regression coverage for behavior changes, and update the README when the command or report contract changes. Do not add credentials, repository contents, local telemetry files, or generated build output.
+
+Package validation is maintainer evidence, not a consumer feature. `scripts/inspect-package.ps1` checks the exact package set, metadata, packed files, README links, icon, and SourceLink evidence. `smoke/package-consumer-smoke.ps1` installs the built `.nupkg` in an isolated tool path and exercises the package-consumer path; CI also exercises the local composite Action wrapper. The tag-gated Trusted Publishing workflow repeats the release checks before publication and is not part of ordinary development.
 
 ## Invariants
 
