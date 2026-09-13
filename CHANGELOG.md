@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.1.0 — Unreleased
+This file records user-visible changes to CompatRadar. The first release is not yet published.
+
+## [Unreleased]
 
 - Initial .NET tool for local and CI future-compatibility comparisons.
 - Comparisons no longer expose candidate identity to the validation command, and they clear inherited MSBuild SDK/tool-path pinning and node reuse so stable and candidate states cannot share build state.

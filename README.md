@@ -17,7 +17,9 @@ dotnet tool update --global KeelMatrix.CompatRadar --version 0.1.0
 dotnet tool uninstall --global KeelMatrix.CompatRadar
 ```
 
-## Five-minute NuGet prerelease check
+## Quick Start
+
+The following five-minute example checks an explicitly selected NuGet prerelease.
 
 Create `compat-radar.json` in the repository root:
 
@@ -206,3 +208,7 @@ Repository development and evidence commands, including the pinned validation co
 ## How this differs from dependency bots
 
 Dependabot and Renovate answer “what versions are available?” and can automate update pull requests. CompatRadar answers “does this explicitly selected future .NET state break this repository while today's stable control passes?” It confirms the failure, distinguishes baseline failure and flakiness, avoids false monotonic claims, and leaves a local reproduction witness for the maintainer.
+
+## License
+
+CompatRadar is licensed under the MIT License. See the [license](https://github.com/KeelMatrix/CompatRadar/blob/main/LICENSE).

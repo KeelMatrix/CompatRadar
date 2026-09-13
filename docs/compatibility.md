@@ -1,5 +1,9 @@
 # Compatibility and change policy
 
+This document is the normative compatibility policy for the `KeelMatrix.CompatRadar` version `1` configuration file and JSON report. It applies to the public CLI, configuration fields, result classifications, exit codes, and report fields used by v1 consumers and maintainers.
+
+Compatibility is evaluated by the repository's v1 round-trip and contract tests: equivalent configuration and report values must preserve their required meanings, and contract changes must be accompanied by the tests, fixtures, documentation, and changelog updates described below.
+
 `compat-radar.json` schema version `1` and the JSON report schema version `1` are durable v1 contracts.
 
 - Additive fields and result metadata are allowed when existing readers can ignore them. Existing field meanings, command names, exit codes, and classification strings are not changed in place.

@@ -10,7 +10,7 @@ Thank you for helping improve CompatRadar.
 - `smoke/` contains the isolated package-consumer smoke script.
 - `artifacts/` is disposable local build and package output and is ignored by Git.
 
-## Development
+## Before you begin
 
 Install the pinned .NET 8 SDK from `global.json`, then run:
 
@@ -28,12 +28,16 @@ pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath artifacts/pa
 pwsh -NoProfile -File scripts/validation-corpus.ps1 -PreviewCandidate '11.0.100-preview.7.26381.103' -RealRepositoryPath $PWD
 ```
 
+## Development
+
 Run the tool from source when developing a focused change:
 
 ```powershell
 dotnet run --project src/KeelMatrix.CompatRadar -- config validate
 dotnet run --project src/KeelMatrix.CompatRadar -- check --format json
 ```
+
+The [validation corpus guide](docs/validation-corpus.md) describes the optional preview and pinned-repository evidence in more detail.
 
 The release workflow uses the same SDK and controlled restore. It is tag-gated and must not be run as part of ordinary development.
 

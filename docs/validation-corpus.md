@@ -10,9 +10,10 @@ pwsh -NoProfile -File scripts/validation-corpus.ps1 -OutputPath artifacts/valida
 ```
 
 The script restores and builds the solution, runs the complete deterministic regression corpus,
-reruns the additive-feed integration test, probes every pinned repository/candidate pair in
-`scripts/validation-corpus.json` when a prerelease SDK/runtime is installed, and writes Markdown,
-JSON, and witness samples under `artifacts/`. It returns `0` only when every named check
+reruns the additive-feed integration test, and probes every pinned repository/candidate pair in
+`scripts/validation-corpus.json` when a prerelease SDK/runtime is installed. It writes Markdown
+and JSON evidence under `artifacts/`; when the optional preview and repository inputs are
+available, it also writes witness samples. It returns `0` only when every named check
 and computed detection condition passes. It returns `2` when an environment prerequisite is
 unavailable; the generated records identify each unavailable or skipped probe. A genuine restore,
 build, test, feed, probe, or cleanup failure stays nonzero and is never recorded as a pass.
