@@ -25,10 +25,14 @@ internal static class TestFixture
     private static readonly string[] Versions = ["1.0.0", "1.1.0", "2.0.0"];
     private static readonly Dictionary<string, string> FeedCache = new(StringComparer.Ordinal);
     private static readonly object FeedLock = new();
-    private static readonly string FeedRoot = Path.Combine(Path.GetTempPath(), "compat-radar-tests", "feeds");
+    private static readonly string ProcessRoot = CreateProcessRoot();
+    private static readonly string FeedRoot = Path.Combine(ProcessRoot, "feeds");
 
     static TestFixture()
     {
+        Environment.SetEnvironmentVariable("TEMP", ProcessRoot);
+        Environment.SetEnvironmentVariable("TMP", ProcessRoot);
+        Environment.SetEnvironmentVariable("TMPDIR", ProcessRoot);
         AppDomain.CurrentDomain.ProcessExit += (_, _) => DeleteFeeds();
     }
 
@@ -49,7 +53,7 @@ internal static class TestFixture
 
     private static string CreateRepositoryCore(string behavior, string feed)
     {
-        var root = Path.Combine(Path.GetTempPath(), "compat-radar-tests", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(ProcessRoot, "repositories", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         File.WriteAllText(Path.Combine(root, "NuGet.Config"), $"""
 <?xml version="1.0" encoding="utf-8"?>
@@ -578,15 +582,65 @@ public static class DependencyApi
     {
         try
         {
-            if (Directory.Exists(FeedRoot))
+            if (Directory.Exists(ProcessRoot))
             {
-                Directory.Delete(FeedRoot, recursive: true);
+                Directory.Delete(ProcessRoot, recursive: true);
             }
         }
         catch
         {
-            // Best-effort cleanup of the shared fixture feed cache.
+            // Best-effort cleanup of this process-owned fixture root.
         }
+    }
+
+    private static string CreateProcessRoot()
+    {
+        var repositoryRoot = new DirectoryInfo(AppContext.BaseDirectory);
+        while (repositoryRoot is not null
+            && !File.Exists(Path.Combine(repositoryRoot.FullName, "KeelMatrix.CompatRadar.sln")))
+        {
+            repositoryRoot = repositoryRoot.Parent;
+        }
+
+        var parent = Path.Combine(
+            repositoryRoot?.Parent?.FullName
+                ?? throw new InvalidOperationException("Could not locate the fixture repository parent."),
+            "cr");
+        Directory.CreateDirectory(parent);
+
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            var root = Path.Combine(parent, $"{Environment.ProcessId}-{Guid.NewGuid():N}");
+            try
+            {
+                Directory.CreateDirectory(root);
+                using (var ownerMarker = new FileStream(
+                    Path.Combine(root, ".owner"),
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete))
+                {
+                    ownerMarker.Write(Encoding.UTF8.GetBytes($"pid={Environment.ProcessId}"));
+                }
+
+                // Keep generated fixture projects independent from repository-wide packaging props.
+                File.WriteAllText(Path.Combine(root, "Directory.Build.props"), "<Project><PropertyGroup><NuGetAudit>false</NuGetAudit></PropertyGroup></Project>");
+                File.WriteAllText(Path.Combine(root, "Directory.Build.targets"), "<Project />");
+                File.WriteAllText(Path.Combine(root, "Directory.Packages.props"), "<Project />");
+
+                return root;
+            }
+            catch (IOException) when (attempt < 49)
+            {
+                // A fresh token should never collide, but leave any collision untouched and retry.
+            }
+            catch (UnauthorizedAccessException) when (attempt < 49)
+            {
+                // Do not take ownership of a directory we cannot prove is ours.
+            }
+        }
+
+        throw new IOException("Could not allocate an isolated fixture root for this test process.");
     }
 
     public static string HashTree(string root)
@@ -633,6 +687,13 @@ public static class DependencyApi
         {
             throw new IOException($"Fixture repository cleanup did not complete: {root}");
         }
+    }
+
+    public static string CreateTemporaryDirectory(string category)
+    {
+        var root = Path.Combine(ProcessRoot, category, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        return root;
     }
 }
 

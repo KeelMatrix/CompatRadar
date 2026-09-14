@@ -181,7 +181,7 @@ public sealed class PackageContractTests
 
     private static void WriteInspectionDiagnostics(string fileName, string packageDirectory, (int ExitCode, string Output) result)
     {
-        var directory = Path.Combine(FindRepositoryRoot(), "artifacts", "test-results");
+        var directory = TestFixture.CreateTemporaryDirectory("package-contract-diagnostics");
         Directory.CreateDirectory(directory);
         File.WriteAllText(
             Path.Combine(directory, fileName),
@@ -292,14 +292,15 @@ public sealed class PackageContractTests
     private static string PackToTemporaryDirectory()
     {
         var root = FindRepositoryRoot();
-        var packageDirectory = Path.Combine(Path.GetTempPath(), "compat-radar-package-contract", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(packageDirectory);
+        var packageDirectory = TestFixture.CreateTemporaryDirectory("package-contract-output");
+        var project = Path.Combine("src", "KeelMatrix.CompatRadar", "KeelMatrix.CompatRadar.csproj");
         var repositoryCommit = GetRepositoryCommit(root);
+        using var packLock = AcquirePackLock(root);
         var result = Run(
             "dotnet",
             [
                 "pack",
-                Path.Combine("src", "KeelMatrix.CompatRadar", "KeelMatrix.CompatRadar.csproj"),
+                project,
                 "-c", "Release",
                 "--no-restore",
                 "--include-symbols",
@@ -315,6 +316,25 @@ public sealed class PackageContractTests
         }
 
         return packageDirectory;
+    }
+
+    private static FileStream AcquirePackLock(string root)
+    {
+        var lockPath = Path.Combine(root, "artifacts", "package-contract-pack.lock");
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+        for (var attempt = 0; attempt < 600; attempt++)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (attempt < 599)
+            {
+                Thread.Sleep(100);
+            }
+        }
+
+        throw new IOException("Could not acquire the package-contract pack lock.");
     }
 
     private static string GetRepositoryCommit(string root)
