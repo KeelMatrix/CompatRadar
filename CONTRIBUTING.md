@@ -45,8 +45,11 @@ Keep changes focused, add regression coverage for behavior changes, and update t
 
 Package validation is maintainer evidence, not a consumer feature. To install the package built from this repository, pack it to the disposable local feed and install that artifact:
 
+The package README comes from `src/KeelMatrix.CompatRadar/README.md`, beside the packable project file. Package inspection compares the packed README with that project-local file and rejects a package carrying the repository-root `README.md`.
+
 ```powershell
-dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build --no-restore --include-symbols --p:SymbolPackageFormat=snupkg --output artifacts/packages
+$packageCommit = (git rev-parse HEAD).Trim()
+dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build --no-restore --include-symbols --p:SymbolPackageFormat=snupkg -p:RepositoryCommit=$packageCommit --output artifacts/packages
 dotnet tool install --global --add-source ./artifacts/packages --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.0 --no-cache
 ```
 
@@ -65,7 +68,7 @@ dotnet tool uninstall --global KeelMatrix.CompatRadar
 Inspect and exercise the exact packed artifact with:
 
 ```powershell
-pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.0
+pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.0 -ExpectedCommit $packageCommit
 pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
 ```
 

@@ -68,6 +68,48 @@ public sealed class PackageContractTests
         }
     }
 
+    [Fact]
+    public void PackageCarryingRepositoryRootReadmeFailsInspection()
+    {
+        var packageDirectory = PackToTemporaryDirectory();
+        try
+        {
+            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg");
+            var repositoryRootReadme = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "README.md"));
+            ReplaceReadme(packagePath, repositoryRootReadme);
+
+            var result = Inspect(packageDirectory);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("must not match the repository-root README", result.Output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(packageDirectory);
+        }
+    }
+
+    [Fact]
+    public void PackageReadmeLineEndingsMayDifferFromProjectFile()
+    {
+        var packageDirectory = PackToTemporaryDirectory();
+        try
+        {
+            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg");
+            var projectReadme = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "KeelMatrix.CompatRadar", "README.md"));
+            var crlfReadme = projectReadme.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\r", "\n", StringComparison.Ordinal).Replace("\n", "\r\n", StringComparison.Ordinal);
+            ReplaceReadme(packagePath, crlfReadme);
+
+            var result = Inspect(packageDirectory);
+
+            Assert.Equal(0, result.ExitCode);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(packageDirectory);
+        }
+    }
+
     [Theory]
     [InlineData("<copyright>KeelMatrix</copyright>", "<copyright></copyright>")]
     [InlineData("<copyright>KeelMatrix</copyright>", "<copyright>Copyright (c) 2026 KeelMatrix</copyright>")]
@@ -209,6 +251,33 @@ public sealed class PackageContractTests
                     writer.Write(Environment.NewLine);
                     writer.Write(appendedMarkdown);
                     writer.Write(Environment.NewLine);
+                }
+                else
+                {
+                    input.CopyTo(output);
+                }
+            }
+        }
+
+        File.Move(staged, packagePath, overwrite: true);
+    }
+
+    private static void ReplaceReadme(string packagePath, string replacement)
+    {
+        var staged = packagePath + ".staged";
+        using (var source = ZipFile.OpenRead(packagePath))
+        using (var target = ZipFile.Open(staged, ZipArchiveMode.Create))
+        {
+            var readme = source.GetEntry("README.md") ?? throw new InvalidOperationException("The packed README is missing.");
+            foreach (var entry in source.Entries)
+            {
+                var created = target.CreateEntry(entry.FullName, CompressionLevel.Optimal);
+                using var input = entry.Open();
+                using var output = created.Open();
+                if (string.Equals(entry.FullName, readme.FullName, StringComparison.Ordinal))
+                {
+                    using var writer = new StreamWriter(output);
+                    writer.Write(replacement);
                 }
                 else
                 {

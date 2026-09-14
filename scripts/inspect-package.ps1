@@ -24,6 +24,10 @@ function Get-EntryText($archive, [string] $name) {
     try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
 
+function Normalize-ReadmeText([string] $text) {
+    return $text.Replace("`r`n", "`n").Replace("`r", "`n")
+}
+
 function Get-IconDimensions($archive) {
     $entry = $archive.GetEntry('icon.png')
     if ($null -eq $entry) { throw 'icon.png is missing.' }
@@ -101,6 +105,18 @@ function Assert-PackageReadmeLinks {
     }
 }
 
+$repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+$projectReadmePath = Join-Path $repositoryRoot 'src/KeelMatrix.CompatRadar/README.md'
+$rootReadmePath = Join-Path $repositoryRoot 'README.md'
+if (-not (Test-Path -LiteralPath $projectReadmePath -PathType Leaf)) {
+    throw "Project-local package README is missing: $projectReadmePath"
+}
+if (-not (Test-Path -LiteralPath $rootReadmePath -PathType Leaf)) {
+    throw "Repository-root README is missing: $rootReadmePath"
+}
+$expectedProjectReadme = Normalize-ReadmeText ([IO.File]::ReadAllText((Resolve-Path -LiteralPath $projectReadmePath).Path))
+$rootReadme = Normalize-ReadmeText ([IO.File]::ReadAllText((Resolve-Path -LiteralPath $rootReadmePath).Path))
+
 $nupkgPath = Join-Path $directory "$id.$ExpectedVersion.nupkg"
 $symbolPath = Join-Path $directory "$id.$ExpectedVersion.snupkg"
 $nupkg = [IO.Compression.ZipFile]::OpenRead($nupkgPath)
@@ -134,6 +150,13 @@ try {
         if ($null -eq $nupkg.GetEntry($required)) { throw "Required package entry '$required' is missing." }
     }
     Assert-PackageReadmeLinks $nupkg
+    $packedReadme = Normalize-ReadmeText (Get-EntryText $nupkg 'README.md')
+    if ($packedReadme -eq $rootReadme) {
+        throw 'Packed README.md must not match the repository-root README.md.'
+    }
+    if ($packedReadme -ne $expectedProjectReadme) {
+        throw "Packed README.md does not match the project-local README at $projectReadmePath."
+    }
     $icon = Get-IconDimensions $nupkg
     if ($icon[0] -ne 512 -or $icon[1] -ne 512) { throw "Icon dimensions $($icon[0])x$($icon[1]) do not match the 512x512 package contract." }
     if ($nupkg.GetEntry('icon.png').Length -gt 204800) { throw 'icon.png exceeds the 200 KB package limit.' }

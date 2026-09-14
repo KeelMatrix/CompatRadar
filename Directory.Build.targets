@@ -7,16 +7,17 @@
 
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
     <!-- Pack is deliberately allow-listed. Local, test, research, generated, and environment files
-         are removed before the three public package files are added back explicitly. -->
+         are removed before the three public package files are added back explicitly. The README is
+         project-local so each packable project owns its NuGet.org documentation. -->
     <None Remove="**/*" />
     <Content Remove="**/*" />
-    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="" Condition="Exists('$(MSBuildThisFileDirectory)README.md')" />
+    <None Include="$(MSBuildProjectDirectory)/README.md" Pack="true" PackagePath="" Condition="Exists('$(MSBuildProjectDirectory)/README.md')" />
     <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="" Condition="Exists('$(MSBuildThisFileDirectory)LICENSE')" />
     <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="" Condition="Exists('$(MSBuildThisFileDirectory)icon.png')" />
   </ItemGroup>
 
   <Target Name="ValidateFailClosedPackInputs" BeforeTargets="Pack" Condition="'$(IsPackable)' != 'false'">
-    <Error Condition="!Exists('$(MSBuildThisFileDirectory)README.md')" Text="Pack input README.md is required." />
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/README.md')" Text="Pack input project-local README.md is required beside the project file." />
     <Error Condition="!Exists('$(MSBuildThisFileDirectory)LICENSE')" Text="Pack input LICENSE is required." />
     <Error Condition="!Exists('$(MSBuildThisFileDirectory)icon.png')" Text="Pack input icon.png is required." />
     <Error Condition="'$(PackageReadmeFile)' != 'README.md'" Text="PackageReadmeFile must remain README.md." />
