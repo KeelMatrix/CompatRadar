@@ -23,9 +23,6 @@ dotnet build KeelMatrix.CompatRadar.sln -c Release --no-restore -warnaserror
 dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore
 dotnet format KeelMatrix.CompatRadar.sln --verify-no-changes
 pwsh -NoProfile -File scripts/security-audit.ps1
-dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build --no-restore --include-symbols --p:SymbolPackageFormat=snupkg --output artifacts/packages
-pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.0
-pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
 pwsh -NoProfile -File scripts/validation-corpus.ps1 -PreviewCandidate '11.0.100-preview.7.26381.103' -RealRepositoryPath $PWD
 ```
 
@@ -65,7 +62,12 @@ Remove the locally installed tool with:
 dotnet tool uninstall --global KeelMatrix.CompatRadar
 ```
 
-Use `scripts/inspect-package.ps1` and `smoke/package-consumer-smoke.ps1` from the validation commands above to inspect and exercise the exact packed artifact.
+Inspect and exercise the exact packed artifact with:
+
+```powershell
+pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.0
+pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
+```
 
 The inspection script checks the exact package set, metadata, packed files, README links, icon, and SourceLink evidence. The smoke script installs the built `.nupkg` in an isolated tool path and exercises the package-consumer path; CI also exercises the local composite Action wrapper. The tag-gated Trusted Publishing workflow repeats the release checks before publication and is not part of ordinary development.
 
