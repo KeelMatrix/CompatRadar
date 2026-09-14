@@ -44,7 +44,30 @@ The release workflow uses the same SDK and controlled restore. It is tag-gated a
 
 Keep changes focused, add regression coverage for behavior changes, and update the README when the command or report contract changes. Do not add credentials, repository contents, local telemetry files, or generated build output.
 
-Package validation is maintainer evidence, not a consumer feature. `scripts/inspect-package.ps1` checks the exact package set, metadata, packed files, README links, icon, and SourceLink evidence. `smoke/package-consumer-smoke.ps1` installs the built `.nupkg` in an isolated tool path and exercises the package-consumer path; CI also exercises the local composite Action wrapper. The tag-gated Trusted Publishing workflow repeats the release checks before publication and is not part of ordinary development.
+### Local package validation
+
+Package validation is maintainer evidence, not a consumer feature. To install the package built from this repository, pack it to the disposable local feed and install that artifact:
+
+```powershell
+dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build --no-restore --include-symbols --p:SymbolPackageFormat=snupkg --output artifacts/packages
+dotnet tool install --global --add-source ./artifacts/packages --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.0 --no-cache
+```
+
+If the local version is already installed, update it with:
+
+```powershell
+dotnet tool update --global --add-source ./artifacts/packages --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.0 --no-cache
+```
+
+Remove the locally installed tool with:
+
+```powershell
+dotnet tool uninstall --global KeelMatrix.CompatRadar
+```
+
+Use `scripts/inspect-package.ps1` and `smoke/package-consumer-smoke.ps1` from the validation commands above to inspect and exercise the exact packed artifact.
+
+The inspection script checks the exact package set, metadata, packed files, README links, icon, and SourceLink evidence. The smoke script installs the built `.nupkg` in an isolated tool path and exercises the package-consumer path; CI also exercises the local composite Action wrapper. The tag-gated Trusted Publishing workflow repeats the release checks before publication and is not part of ordinary development.
 
 ## Invariants
 

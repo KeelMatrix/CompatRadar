@@ -10,4 +10,4 @@ The tool keeps comparison state in a temporary directory, bounds process time an
 
 ## Supported Versions
 
-CompatRadar has no published release yet, so no package version is currently supported. During pre-release development, security fixes are applied to the `main` branch. After the first release, the latest published version on the `0.x` line will be the supported baseline; older preview builds and unreleased commits will not be supported security baselines. The maintainers will acknowledge private reports within five business days and will publish a fix or mitigation timeline when the impact is confirmed.
+The latest published release on the `0.x` line is supported. Security fixes are backported only to the latest supported minor release; users should update to the newest patch release before requesting a backport. Unreleased commits and old preview builds are not supported security baselines. The maintainers will acknowledge private reports within five business days and will publish a fix or mitigation timeline when the impact is confirmed.

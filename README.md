@@ -6,24 +6,16 @@ CompatRadar is a local-first .NET tool. It compares an explicitly selected NuGet
 
 ## Install
 
-CompatRadar is not yet published to NuGet.org, and the first public release tag does not exist. The following is a local-package path for trying the unreleased source; it is not a public NuGet installation.
+Install the tool from NuGet.org:
 
-From the repository root, pack and install the local package:
-
-```powershell
-dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --output artifacts/packages
-dotnet tool install --global --add-source ./artifacts/packages --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.0 --no-cache
+```bash
+dotnet tool install --global KeelMatrix.CompatRadar --version 0.1.0
 ```
 
-If that local version is already installed, update it with:
+Update or remove it with:
 
-```powershell
-dotnet tool update --global --add-source ./artifacts/packages --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.0 --no-cache
-```
-
-Remove the local tool with:
-
-```powershell
+```bash
+dotnet tool update --global KeelMatrix.CompatRadar --version 0.1.0
 dotnet tool uninstall --global KeelMatrix.CompatRadar
 ```
 
@@ -171,7 +163,19 @@ Use `--format json` for CI and `--report <path>` to write an artifact explicitly
 
 ## GitHub Action
 
-The repository includes a composite Action wrapper. It is not yet a public consumer path because no matching package and release tag exist, so this README intentionally defers a tagged `uses:` example. Maintainers can validate the packaged tool and Action wrapper through the [contributor guide](https://github.com/KeelMatrix/CompatRadar/blob/main/CONTRIBUTING.md#development).
+The repository includes a composite Action wrapper. Install the tool in the job, then call the local Action. For a tagged release, consumers can use the immutable release tag:
+
+```yaml
+- name: Install CompatRadar
+  shell: bash
+  run: dotnet tool install --global KeelMatrix.CompatRadar --version 0.1.0
+
+- name: Check future compatibility
+  uses: KeelMatrix/CompatRadar@v0.1.0
+  with:
+    config: compat-radar.json
+    report: artifacts/compat-radar-report.json
+```
 
 The wrapper invokes the same `compat-radar check` command, appends the report to `GITHUB_STEP_SUMMARY`, and emits a workflow error annotation for exit code `1`. No hosted dashboard is required. The repository CI workflow validates the supported Windows, Linux, and macOS operations, the packed-tool consumer path, and the Action failure path.
 
