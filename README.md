@@ -25,7 +25,9 @@ For repository development and release validation, use the [contributor guide](h
 
 The following five-minute template checks an explicitly selected NuGet prerelease.
 
-Before running it, replace `Example.Dependency` and both candidate versions with a package and prerelease sequence that your repository already references and your configured feed actually provides. This repository is one concrete example: `NuGet.Versioning` is referenced by `src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj` and pinned to `7.9.0` in `Directory.Packages.props`. If you monitor that package, select its available prerelease candidates from the configured feed; if it has no suitable prerelease, choose another package already declared by your repository. The commands below are intended to run after those watch values are replaced.
+Before running it, replace `Example.Dependency` and both candidate versions with a package and prerelease sequence that your repository already references and your configured feed actually provides. This repository is one concrete example.
+
+`NuGet.Versioning` is pinned to `7.9.0` in `Directory.Packages.props` and referenced by the tool project. If you monitor that package, select its available prerelease candidates from the configured feed; if it has no suitable prerelease, choose another package already declared by your repository. The commands below are intended to run after those watch values are replaced.
 
 Create `compat-radar.json` in the repository root:
 
