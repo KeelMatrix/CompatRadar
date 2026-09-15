@@ -5,6 +5,7 @@ param(
     [string] $ChangelogPath = 'CHANGELOG.md',
     [string] $ExpectedPackageVersion,
     [string] $ExpectedCommit,
+    [switch] $FirstRelease,
     [string] $RepositoryPath = (Get-Location).Path
 )
 
@@ -154,6 +155,30 @@ if (-not [DateTime]::TryParseExact($dateText, 'yyyy-MM-dd', [Globalization.Cultu
 }
 if ($releaseDate.Date -gt [DateTime]::UtcNow.Date) {
     Fail-Contract "release date '$dateText' is later than the current UTC date."
+}
+
+if ($FirstRelease) {
+    $targetEndIndex = $lines.Count
+    foreach ($heading in $headings) {
+        if ($heading.Index -gt $target.Index -and $heading.Level -le $target.Level) {
+            $targetEndIndex = $heading.Index
+            break
+        }
+    }
+
+    # These exact terms are a deliberately narrow editorial backstop for first releases. A
+    # first public release must describe the product users receive, not how an unpublished
+    # implementation changed during development. Later releases may use these terms when they
+    # truthfully describe a material difference from a published version.
+    $firstReleaseRemediationPattern = '(?i)\b(?<marker>no\s+longer|previously|formerly|used\s+to|this\s+removes|this\s+fixes|changed\s+from|now|fixed|fixes|corrected|resolved|addressed)\b'
+    for ($lineIndex = $target.Index; $lineIndex -lt $targetEndIndex; $lineIndex++) {
+        $line = $lines[$lineIndex]
+        $match = [regex]::Match($line, $firstReleaseRemediationPattern)
+        if ($match.Success) {
+            $marker = $match.Groups['marker'].Value
+            Fail-Contract "first-release entry line $($lineIndex + 1) uses remediation-history marker '$marker'; describe the final consumer-facing capability instead."
+        }
+    }
 }
 
 $allFiles = Get-ContractFiles $repository

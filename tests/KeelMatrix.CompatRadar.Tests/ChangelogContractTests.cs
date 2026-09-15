@@ -11,7 +11,7 @@ public sealed class ChangelogContractTests
         var fixture = CreateFixture("## 1.2.3 - Unreleased", "1.2.3", "1.2.3");
         try
         {
-            var result = RunContract(fixture.Root, "1.2.3", fixture.Commit, "1.2.3");
+            var result = RunContract(fixture.Root, "1.2.3", fixture.Commit, "1.2.3", firstRelease: true);
 
             Assert.NotEqual(0, result.ExitCode);
             Assert.Contains("pre-release", result.Output, StringComparison.OrdinalIgnoreCase);
@@ -30,7 +30,7 @@ public sealed class ChangelogContractTests
         var fixture = CreateFixture($"## 1.2.3 - {date}", "1.2.3", installExample: installExample);
         try
         {
-            var result = RunContract(fixture.Root, "1.2.3", fixture.Commit, "1.2.3");
+            var result = RunContract(fixture.Root, "1.2.3", fixture.Commit, "1.2.3", firstRelease: true);
 
             Assert.Equal(0, result.ExitCode);
             Assert.Contains("Changelog contract passed", result.Output, StringComparison.Ordinal);
@@ -48,7 +48,7 @@ public sealed class ChangelogContractTests
         var fixture = CreateFixture($"# [Unreleased]\n\n## 1.2.3 - {date}", "1.2.3", "1.2.3");
         try
         {
-            var result = RunContract(fixture.Root, "1.2.3", fixture.Commit, "1.2.3");
+            var result = RunContract(fixture.Root, "1.2.3", fixture.Commit, "1.2.3", firstRelease: true);
 
             Assert.NotEqual(0, result.ExitCode);
             Assert.Contains("inside", result.Output, StringComparison.OrdinalIgnoreCase);
@@ -57,6 +57,47 @@ public sealed class ChangelogContractTests
         {
             TestFixture.DeleteRepository(fixture.Root);
         }
+    }
+
+    [Theory]
+    [InlineData("now")]
+    [InlineData("no longer")]
+    [InlineData("previously")]
+    [InlineData("formerly")]
+    [InlineData("used to")]
+    [InlineData("fixed")]
+    [InlineData("fixes")]
+    [InlineData("corrected")]
+    [InlineData("resolved")]
+    [InlineData("addressed")]
+    [InlineData("this removes")]
+    [InlineData("this fixes")]
+    [InlineData("changed from")]
+    public void FirstReleaseRemediationHistoryMarkersFailClosed(string marker)
+    {
+        var date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var releaseEntry = $"### Added\n\n- Provides the final compatibility workflow; {marker} behavior is described here.\n";
+        var fixture = CreateFixture($"## 1.2.3 - {date}", "1.2.3", releaseBody: releaseEntry);
+        try
+        {
+            var result = RunContract(fixture.Root, "1.2.3", fixture.Commit, "1.2.3", firstRelease: true);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("remediation-history marker", result.Output, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            TestFixture.DeleteRepository(fixture.Root);
+        }
+    }
+
+    [Fact]
+    public void CurrentFinalizedFirstReleaseEntryPasses()
+    {
+        var result = RunContract(FindRepositoryRoot(), "0.1.0", expectedCommit: null, expectedPackageVersion: "0.1.0", firstRelease: true);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Changelog contract passed", result.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -208,11 +249,11 @@ public sealed class ChangelogContractTests
         }
     }
 
-    private static ContractFixture CreateFixture(string changelogHeading, string packageVersion, string installVersion = "1.2.3", string? installExample = null)
+    private static ContractFixture CreateFixture(string changelogHeading, string packageVersion, string installVersion = "1.2.3", string? installExample = null, string? releaseBody = null)
     {
         var root = Path.Combine(Path.GetTempPath(), "compat-radar-changelog-contract", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, "CHANGELOG.md"), $"# Changelog\n\n{changelogHeading}\n\n- Initial release.\n");
+        File.WriteAllText(Path.Combine(root, "CHANGELOG.md"), $"# Changelog\n\n{changelogHeading}\n\n{releaseBody ?? "- Initial release."}\n");
         File.WriteAllText(Path.Combine(root, "Directory.Build.props"), $"<Project><PropertyGroup><CompatRadarReleaseVersion>{packageVersion}</CompatRadarReleaseVersion></PropertyGroup></Project>\n");
         File.WriteAllText(Path.Combine(root, "README.md"), installExample ?? $"# CompatRadar\n\n`dotnet tool install --global KeelMatrix.CompatRadar --version {installVersion}`\n");
 
@@ -225,12 +266,11 @@ public sealed class ChangelogContractTests
         return new ContractFixture(root, commit);
     }
 
-    private static ProcessResult RunContract(string root, string expectedVersion, string expectedCommit, string expectedPackageVersion)
+    private static ProcessResult RunContract(string root, string expectedVersion, string? expectedCommit, string expectedPackageVersion, bool firstRelease = false)
     {
         var script = Path.Combine(FindRepositoryRoot(), "scripts", "Test-ChangelogContract.ps1");
-        return RunProcess(
-            "pwsh",
-            FindRepositoryRoot(),
+        var arguments = new List<string>
+        {
             "-NoProfile",
             "-File",
             script,
@@ -241,9 +281,16 @@ public sealed class ChangelogContractTests
             "-ExpectedVersion",
             expectedVersion,
             "-ExpectedPackageVersion",
-            expectedPackageVersion,
-            "-ExpectedCommit",
-            expectedCommit);
+            expectedPackageVersion
+        };
+        if (!string.IsNullOrWhiteSpace(expectedCommit))
+        {
+            arguments.Add("-ExpectedCommit");
+            arguments.Add(expectedCommit);
+        }
+        if (firstRelease) arguments.Add("-FirstRelease");
+
+        return RunProcess("pwsh", FindRepositoryRoot(), arguments.ToArray());
     }
 
     private static ProcessResult RunProcess(string fileName, string workingDirectory, params string[] arguments)

@@ -31,6 +31,7 @@ public sealed class ReleaseContractTests
         Assert.True(changelogValidation < validation.IndexOf("dotnet pack", StringComparison.Ordinal), "The changelog contract must run before packing.");
         Assert.Contains("-ExpectedPackageVersion $env:RELEASE_VERSION", validation, StringComparison.Ordinal);
         Assert.Contains("-ExpectedCommit $env:GITHUB_SHA", validation, StringComparison.Ordinal);
+        Assert.Contains("-FirstRelease", validation, StringComparison.Ordinal);
         Assert.Contains("scripts/inspect-package.ps1", validation, StringComparison.Ordinal);
         Assert.Contains("smoke/package-consumer-smoke.ps1", validation, StringComparison.Ordinal);
         Assert.Contains("NuGet/login@v1", publication, StringComparison.Ordinal);

@@ -39,7 +39,7 @@ jobs:
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
-        run: pwsh -NoProfile -File ./scripts/Test-ChangelogContract.ps1 -RepositoryPath $PWD -ChangelogPath CHANGELOG.md -ExpectedVersion $env:RELEASE_VERSION -ExpectedPackageVersion $env:RELEASE_VERSION -ExpectedCommit $env:GITHUB_SHA
+        run: pwsh -NoProfile -File ./scripts/Test-ChangelogContract.ps1 -RepositoryPath $PWD -ChangelogPath CHANGELOG.md -ExpectedVersion $env:RELEASE_VERSION -ExpectedPackageVersion $env:RELEASE_VERSION -ExpectedCommit $env:GITHUB_SHA -FirstRelease
 
       - name: Set up pinned .NET SDK
         uses: actions/setup-dotnet@v6
