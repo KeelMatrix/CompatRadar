@@ -250,6 +250,9 @@ jobs:
 
       - name: Run validation corpus
         shell: pwsh
+        env:
+          # The pinned corpus includes VSTest projects alongside repository-level MTP configuration.
+          DOTNET_TEST_RUNNER: VSTest
         run: |
           $paths = @(
             'gate-corpus/KeelMatrix.Redaction',
