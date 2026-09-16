@@ -177,11 +177,17 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # The pinned corpus repositories are checked out beside the source tree, not inside it, so the
+    # deterministic suite always inspects a clean product working tree.
+    defaults:
+      run:
+        working-directory: project
     steps:
       - name: Check out source
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: project
 
       - name: Check out pinned real-repository corpus
         uses: actions/checkout@v7
@@ -252,17 +258,18 @@ jobs:
         shell: pwsh
         run: |
           $paths = @(
-            'gate-corpus/KeelMatrix.Redaction',
-            'gate-corpus/KeelMatrix.Telemetry',
-            'gate-corpus/KeelMatrix.QueryWatch',
-            'gate-corpus/RichardSzalay.MockHttp',
-            'gate-corpus/WireMock.Net',
-            'gate-corpus/Verify'
+            '${{ github.workspace }}/gate-corpus/KeelMatrix.Redaction',
+            '${{ github.workspace }}/gate-corpus/KeelMatrix.Telemetry',
+            '${{ github.workspace }}/gate-corpus/KeelMatrix.QueryWatch',
+            '${{ github.workspace }}/gate-corpus/RichardSzalay.MockHttp',
+            '${{ github.workspace }}/gate-corpus/WireMock.Net',
+            '${{ github.workspace }}/gate-corpus/Verify'
           )
           $corpusParameters = @{
             OutputPath = 'artifacts/validation-corpus.md'
             CorpusManifestPath = 'scripts/validation-corpus.json'
             WitnessPackOutputPath = 'artifacts/validation-witness-pack'
+            CorpusRoot = '${{ github.workspace }}'
             PreviewCandidate = @(
               '11.0.100-preview.7.26381.103',
               '11.0.100-rc.1.26425.128'
@@ -283,9 +290,9 @@ jobs:
           name: validation-corpus
           if-no-files-found: warn
           path: |
-            artifacts/validation-corpus.md
-            artifacts/validation-corpus.json
-            artifacts/validation-witness-pack
+            project/artifacts/validation-corpus.md
+            project/artifacts/validation-corpus.json
+            project/artifacts/validation-witness-pack
 
   package:
     name: Package / inspect

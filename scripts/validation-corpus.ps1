@@ -4,7 +4,8 @@ param(
     [string[]] $RealRepositoryPath = @(),
     [string[]] $PreviewCandidate = @(),
     [string] $CorpusManifestPath = 'scripts/validation-corpus.json',
-    [string] $WitnessPackOutputPath = 'artifacts/validation-witness-pack'
+    [string] $WitnessPackOutputPath = 'artifacts/validation-witness-pack',
+    [string] $CorpusRoot = '.'
 )
 
 # Produces reproducible evidence for the pinned validation corpus: it restores and builds the
@@ -12,6 +13,9 @@ param(
 # classifications those tests actually observed, probes the pinned repositories with real
 # prerelease candidates when the environment provides them, and writes witness samples that omit
 # outcome labels. Structural validation of those samples does not assign an analysis outcome.
+#
+# The manifest declares its corpus paths relative to -CorpusRoot (the repository root by default),
+# so a caller can keep the pinned checkouts outside the repository working tree.
 
 $ErrorActionPreference = 'Stop'
 $env:KEELMATRIX_NO_TELEMETRY = '1'
@@ -286,9 +290,6 @@ $requiredTests = @($namedChecks | ForEach-Object { $_.name })
 $listed = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --list-tests 2>&1 | Out-String)
 $missing = @($requiredTests | Where-Object { $listed -notmatch [regex]::Escape($_) })
 if ($missing.Count -gt 0) { throw "Validation corpus tests are missing: $($missing -join ', ')" }
-# The independent Validate job runs the complete solution; this gate re-runs only the named
-# deterministic corpus checks so unrelated suite tests cannot change the corpus result.
-$corpusFilter = ($requiredTests | ForEach-Object { "FullyQualifiedName~$_" }) -join '|'
 
 $manifestFile = (Resolve-Path -LiteralPath $CorpusManifestPath -ErrorAction Stop).Path
 try {
@@ -329,17 +330,24 @@ if (@($expectedOutcomeDefinitions | Where-Object { [string]$_.group -eq 'incompa
     throw 'The validation corpus must include cases with a genuinely incompatible candidate state.'
 }
 
+$corpusRootPath = if ([IO.Path]::IsPathRooted($CorpusRoot)) {
+    [IO.Path]::GetFullPath($CorpusRoot)
+}
+else {
+    [IO.Path]::GetFullPath((Join-Path (Get-Location).Path $CorpusRoot))
+}
+
 $configuredPaths = @($RealRepositoryPath)
 foreach ($configuredPath in $configuredPaths) {
     $configuredFullPath = [IO.Path]::GetFullPath($configuredPath)
     $matches = @($repositoryDefinitions | Where-Object {
-        [IO.Path]::GetFullPath((Join-Path (Get-Location) ([string]$_.path))) -eq $configuredFullPath
+        [IO.Path]::GetFullPath((Join-Path $corpusRootPath ([string]$_.path))) -eq $configuredFullPath
     })
     if ($matches.Count -ne 1) { throw "Real repository path '$configuredPath' is not declared by the validation corpus manifest." }
 }
 $availableRealRepositoryPaths = [Collections.Generic.List[string]]::new()
 foreach ($definition in $repositoryDefinitions) {
-    $path = [string]$definition.path
+    $path = Join-Path $corpusRootPath ([string]$definition.path)
     if ($configuredPaths.Count -eq 0) { continue }
     if (-not (Test-Path -LiteralPath $path -PathType Container)) {
         $environmentLimits.Add([pscustomobject]@{
@@ -361,7 +369,7 @@ $stopwatch.Restart()
 New-Item -ItemType Directory -Force -Path $testResultsDirectory | Out-Null
 $env:COMPATRADAR_TEST_OUTCOMES_PATH = $observedOutcomesPath
 try {
-    $testOutput = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --filter $corpusFilter --logger 'trx;LogFileName=validation-corpus.trx' --results-directory $testResultsDirectory 2>&1 | Out-String)
+    $testOutput = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --logger 'trx;LogFileName=validation-corpus.trx' --results-directory $testResultsDirectory 2>&1 | Out-String)
     $testStatus = $LASTEXITCODE
 }
 finally {
