@@ -286,6 +286,9 @@ $requiredTests = @($namedChecks | ForEach-Object { $_.name })
 $listed = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --list-tests 2>&1 | Out-String)
 $missing = @($requiredTests | Where-Object { $listed -notmatch [regex]::Escape($_) })
 if ($missing.Count -gt 0) { throw "Validation corpus tests are missing: $($missing -join ', ')" }
+# The independent Validate job runs the complete solution; this gate re-runs only the named
+# deterministic corpus checks so unrelated suite tests cannot change the corpus result.
+$corpusFilter = ($requiredTests | ForEach-Object { "FullyQualifiedName~$_" }) -join '|'
 
 $manifestFile = (Resolve-Path -LiteralPath $CorpusManifestPath -ErrorAction Stop).Path
 try {
@@ -358,7 +361,7 @@ $stopwatch.Restart()
 New-Item -ItemType Directory -Force -Path $testResultsDirectory | Out-Null
 $env:COMPATRADAR_TEST_OUTCOMES_PATH = $observedOutcomesPath
 try {
-    $testOutput = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --logger 'trx;LogFileName=validation-corpus.trx' --results-directory $testResultsDirectory 2>&1 | Out-String)
+    $testOutput = (& dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore --filter $corpusFilter --logger 'trx;LogFileName=validation-corpus.trx' --results-directory $testResultsDirectory 2>&1 | Out-String)
     $testStatus = $LASTEXITCODE
 }
 finally {
