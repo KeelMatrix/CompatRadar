@@ -50,13 +50,13 @@ The package README comes from `src/KeelMatrix.CompatRadar/README.md`, beside the
 ```powershell
 $packageCommit = (git rev-parse HEAD).Trim()
 dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build --no-restore --include-symbols --p:SymbolPackageFormat=snupkg -p:RepositoryCommit=$packageCommit --output artifacts/packages
-dotnet tool install --global --add-source ./artifacts/packages --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.0 --no-cache
+dotnet tool install --global --add-source ./artifacts/packages --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.1 --no-cache
 ```
 
 If the local version is already installed, update it with:
 
 ```powershell
-dotnet tool update --global --add-source ./artifacts/packages --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.0 --no-cache
+dotnet tool update --global --add-source ./artifacts/packages --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.1 --no-cache
 ```
 
 Remove the locally installed tool with:
@@ -68,8 +68,8 @@ dotnet tool uninstall --global KeelMatrix.CompatRadar
 Inspect and exercise the exact packed artifact with:
 
 ```powershell
-pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.0 -ExpectedCommit $packageCommit
-pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
+pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.1 -ExpectedCommit $packageCommit
+pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath artifacts/packages/KeelMatrix.CompatRadar.0.1.1.nupkg
 ```
 
 The inspection script checks the exact package set, metadata, packed files, README links, icon, and SourceLink evidence. The smoke script installs the built `.nupkg` in an isolated tool path and exercises the package-consumer path; CI also exercises the local composite Action wrapper. The tag-gated Trusted Publishing workflow repeats the release checks before publication and is not part of ordinary development.
@@ -100,7 +100,7 @@ Describe the user-facing behavior, tests run, package/consumer verification, and
 Before creating a release tag, finalize the target entry in `CHANGELOG.md`, commit and push that change, and verify the exact commit with the repository changelog contract:
 
 ```powershell
-$releaseVersion = '0.1.0'
+$releaseVersion = '0.1.1'
 $releaseCommit = (git rev-parse HEAD).Trim()
 pwsh -NoProfile -File scripts/Test-ChangelogContract.ps1 -RepositoryPath $PWD -ChangelogPath CHANGELOG.md -ExpectedVersion $releaseVersion -ExpectedPackageVersion $releaseVersion -ExpectedCommit $releaseCommit
 ```

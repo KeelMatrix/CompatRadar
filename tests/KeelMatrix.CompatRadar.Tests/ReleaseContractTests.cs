@@ -3,7 +3,7 @@ namespace KeelMatrix.CompatRadar.Tests;
 public sealed class ReleaseContractTests
 {
     [Fact]
-    public void FirstReleaseWorkflowIsExactAndFailClosed()
+    public void ReleaseWorkflowIsExactAndFailClosed()
     {
         var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "release.yml"));
         var publishStart = workflow.IndexOf("  publish:", StringComparison.Ordinal);
@@ -11,9 +11,9 @@ public sealed class ReleaseContractTests
         var validation = workflow[..publishStart];
         var publication = workflow[publishStart..];
 
-        Assert.Contains("- 'v0.1.0'", workflow, StringComparison.Ordinal);
+        Assert.Contains("- 'v0.1.1'", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("- 'v*'", workflow, StringComparison.Ordinal);
-        Assert.Contains("$GITHUB_REF_NAME\" != 'v0.1.0'", validation, StringComparison.Ordinal);
+        Assert.Contains("$GITHUB_REF_NAME\" != 'v0.1.1'", validation, StringComparison.Ordinal);
         Assert.DoesNotContain("vX.Y.Z", workflow, StringComparison.Ordinal);
 
         Assert.Equal(1, Count(workflow, "id-token: write"));
@@ -31,7 +31,7 @@ public sealed class ReleaseContractTests
         Assert.True(changelogValidation < validation.IndexOf("dotnet pack", StringComparison.Ordinal), "The changelog contract must run before packing.");
         Assert.Contains("-ExpectedPackageVersion $env:RELEASE_VERSION", validation, StringComparison.Ordinal);
         Assert.Contains("-ExpectedCommit $env:GITHUB_SHA", validation, StringComparison.Ordinal);
-        Assert.Contains("-FirstRelease", validation, StringComparison.Ordinal);
+        Assert.DoesNotContain("-FirstRelease", validation, StringComparison.Ordinal);
         Assert.Contains("scripts/inspect-package.ps1", validation, StringComparison.Ordinal);
         Assert.Contains("smoke/package-consumer-smoke.ps1", validation, StringComparison.Ordinal);
         Assert.Contains("NuGet/login@v1", publication, StringComparison.Ordinal);
@@ -40,10 +40,10 @@ public sealed class ReleaseContractTests
         Assert.Equal(1, Count(publication, "dotnet nuget push $nupkg"));
         Assert.Equal(1, Count(publication, "dotnet nuget push $snupkg"));
         Assert.Contains("--no-symbols", publication, StringComparison.Ordinal);
-        Assert.Equal(1, Count(validation, "KeelMatrix.CompatRadar.0.1.0.nupkg"));
-        Assert.Equal(1, Count(validation, "KeelMatrix.CompatRadar.0.1.0.snupkg"));
-        Assert.Equal(1, Count(publication, "KeelMatrix.CompatRadar.0.1.0.nupkg"));
-        Assert.Equal(1, Count(publication, "KeelMatrix.CompatRadar.0.1.0.snupkg"));
+        Assert.Equal(1, Count(validation, "KeelMatrix.CompatRadar.0.1.1.nupkg"));
+        Assert.Equal(1, Count(validation, "KeelMatrix.CompatRadar.0.1.1.snupkg"));
+        Assert.Equal(1, Count(publication, "KeelMatrix.CompatRadar.0.1.1.nupkg"));
+        Assert.Equal(1, Count(publication, "KeelMatrix.CompatRadar.0.1.1.snupkg"));
     }
 
     private static int Count(string text, string value)

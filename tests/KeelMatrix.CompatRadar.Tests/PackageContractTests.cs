@@ -29,7 +29,7 @@ public sealed class PackageContractTests
         var packageDirectory = PackToTemporaryDirectory();
         try
         {
-            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg");
+            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.1.nupkg");
             using (var archive = ZipFile.Open(packagePath, ZipArchiveMode.Update))
             using (var writer = new StreamWriter(archive.CreateEntry("tools/net8.0/any/harmless.txt").Open()))
             {
@@ -53,7 +53,7 @@ public sealed class PackageContractTests
         var packageDirectory = PackToTemporaryDirectory();
         try
         {
-            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg");
+            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.1.nupkg");
             RewriteReadme(packagePath, "See [compatibility policy](docs/compatibility.md).");
 
             var result = Inspect(packageDirectory);
@@ -74,7 +74,7 @@ public sealed class PackageContractTests
         var packageDirectory = PackToTemporaryDirectory();
         try
         {
-            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg");
+            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.1.nupkg");
             var repositoryRootReadme = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "README.md"));
             ReplaceReadme(packagePath, repositoryRootReadme);
 
@@ -95,7 +95,7 @@ public sealed class PackageContractTests
         var packageDirectory = PackToTemporaryDirectory();
         try
         {
-            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg");
+            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.1.nupkg");
             var projectReadme = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "KeelMatrix.CompatRadar", "README.md"));
             var crlfReadme = projectReadme.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\r", "\n", StringComparison.Ordinal).Replace("\n", "\r\n", StringComparison.Ordinal);
             ReplaceReadme(packagePath, crlfReadme);
@@ -120,7 +120,7 @@ public sealed class PackageContractTests
         var packageDirectory = PackToTemporaryDirectory();
         try
         {
-            RewriteNuspec(Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg"), search, replacement);
+            RewriteNuspec(Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.1.nupkg"), search, replacement);
 
             var result = Inspect(packageDirectory);
 
@@ -140,7 +140,7 @@ public sealed class PackageContractTests
         try
         {
             RewriteNuspec(
-                Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg"),
+                Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.1.nupkg"),
                 ApprovedDescription,
                 "Test your .NET repository against future SDK and NuGet candidates, confirm real breakage, and localize the first bad candidate before normal upgrade time.");
 
@@ -161,7 +161,7 @@ public sealed class PackageContractTests
         var packageDirectory = PackToTemporaryDirectory();
         try
         {
-            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.0.nupkg");
+            var packagePath = Path.Combine(packageDirectory, "KeelMatrix.CompatRadar.0.1.1.nupkg");
             using var archive = ZipFile.OpenRead(packagePath);
             var nuspec = archive.Entries.Single(entry => entry.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase));
             using var reader = new StreamReader(nuspec.Open());
@@ -362,7 +362,7 @@ public sealed class PackageContractTests
             [
                 "-NoProfile", "-File", Path.Combine(root, "scripts", "inspect-package.ps1"),
                 "-PackageDirectory", packageDirectory,
-                "-ExpectedVersion", "0.1.0"
+                "-ExpectedVersion", "0.1.1"
             ],
             root);
     }

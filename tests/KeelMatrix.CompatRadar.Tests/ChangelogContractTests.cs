@@ -92,9 +92,9 @@ public sealed class ChangelogContractTests
     }
 
     [Fact]
-    public void CurrentFinalizedFirstReleaseEntryPasses()
+    public void CurrentFinalizedReleaseEntryPasses()
     {
-        var result = RunContract(FindRepositoryRoot(), "0.1.0", expectedCommit: null, expectedPackageVersion: "0.1.0", firstRelease: true);
+        var result = RunContract(FindRepositoryRoot(), "0.1.1", expectedCommit: null, expectedPackageVersion: "0.1.1");
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Changelog contract passed", result.Output, StringComparison.Ordinal);
@@ -216,11 +216,11 @@ public sealed class ChangelogContractTests
     public void EqualsInstallExampleVersionMatchPasses()
     {
         var date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var installExample = "# CompatRadar\n\ndotnet tool install --global KeelMatrix.CompatRadar --version=0.1.0\n";
-        var fixture = CreateFixture($"## 0.1.0 - {date}", "0.1.0", installExample: installExample);
+        var installExample = "# CompatRadar\n\ndotnet tool install --global KeelMatrix.CompatRadar --version=0.1.1\n";
+        var fixture = CreateFixture($"## 0.1.1 - {date}", "0.1.1", installExample: installExample);
         try
         {
-            var result = RunContract(fixture.Root, "0.1.0", fixture.Commit, "0.1.0");
+            var result = RunContract(fixture.Root, "0.1.1", fixture.Commit, "0.1.1");
 
             Assert.Equal(0, result.ExitCode);
             Assert.Contains("Changelog contract passed", result.Output, StringComparison.Ordinal);

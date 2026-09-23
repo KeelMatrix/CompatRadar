@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v0.1.0'
+      - 'v0.1.1'
 
 permissions:
   contents: read
@@ -14,7 +14,7 @@ env:
 
 jobs:
   validate:
-    name: Validate first release candidate
+    name: Validate release candidate
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -29,17 +29,17 @@ jobs:
         id: version
         shell: bash
         run: |
-          if [[ "$GITHUB_REF_TYPE" != tag || "$GITHUB_REF_NAME" != 'v0.1.0' ]]; then
-            echo 'First release workflow accepts only v0.1.0.' >&2
+          if [[ "$GITHUB_REF_TYPE" != tag || "$GITHUB_REF_NAME" != 'v0.1.1' ]]; then
+            echo 'Release workflow accepts only v0.1.1.' >&2
             exit 1
           fi
-          echo 'release_version=0.1.0' >> "$GITHUB_OUTPUT"
+          echo 'release_version=0.1.1' >> "$GITHUB_OUTPUT"
 
       - name: Validate changelog and version contract
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
-        run: pwsh -NoProfile -File ./scripts/Test-ChangelogContract.ps1 -RepositoryPath $PWD -ChangelogPath CHANGELOG.md -ExpectedVersion $env:RELEASE_VERSION -ExpectedPackageVersion $env:RELEASE_VERSION -ExpectedCommit $env:GITHUB_SHA -FirstRelease
+        run: pwsh -NoProfile -File ./scripts/Test-ChangelogContract.ps1 -RepositoryPath $PWD -ChangelogPath CHANGELOG.md -ExpectedVersion $env:RELEASE_VERSION -ExpectedPackageVersion $env:RELEASE_VERSION -ExpectedCommit $env:GITHUB_SHA
 
       - name: Set up pinned .NET SDK
         uses: actions/setup-dotnet@v6
@@ -92,15 +92,15 @@ jobs:
       - name: Upload exactly validated package artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: compatradar-first-release
+          name: compatradar-release
           retention-days: 1
           if-no-files-found: error
           path: |
-            artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
-            artifacts/packages/KeelMatrix.CompatRadar.0.1.0.snupkg
+            artifacts/packages/KeelMatrix.CompatRadar.0.1.1.nupkg
+            artifacts/packages/KeelMatrix.CompatRadar.0.1.1.snupkg
 
   publish:
-    name: Publish validated first release
+    name: Publish validated release
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -111,7 +111,7 @@ jobs:
       - name: Download exactly validated package artifacts
         uses: actions/download-artifact@v8
         with:
-          name: compatradar-first-release
+          name: compatradar-release
           path: artifacts/packages
 
       - name: Authenticate to NuGet.org
@@ -125,8 +125,8 @@ jobs:
         env:
           NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         run: |
-          $nupkg = Join-Path $PWD 'artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg'
-          $snupkg = Join-Path $PWD 'artifacts/packages/KeelMatrix.CompatRadar.0.1.0.snupkg'
+          $nupkg = Join-Path $PWD 'artifacts/packages/KeelMatrix.CompatRadar.0.1.1.nupkg'
+          $snupkg = Join-Path $PWD 'artifacts/packages/KeelMatrix.CompatRadar.0.1.1.snupkg'
           if (-not (Test-Path -LiteralPath $nupkg) -or -not (Test-Path -LiteralPath $snupkg)) { throw 'Validated package artifacts are missing.' }
           dotnet nuget push $nupkg --source https://api.nuget.org/v3/index.json --api-key $env:NUGET_API_KEY --no-symbols
           if ($LASTEXITCODE -ne 0) { throw 'Primary package publication failed; symbol publication was not attempted.' }

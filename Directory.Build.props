@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <CompatRadarReleaseVersion Condition="'$(CompatRadarReleaseVersion)' == ''">0.1.0</CompatRadarReleaseVersion>
+    <CompatRadarReleaseVersion Condition="'$(CompatRadarReleaseVersion)' == ''">0.1.1</CompatRadarReleaseVersion>
     <Version>$(CompatRadarReleaseVersion)</Version>
     <PackageVersion>$(Version)</PackageVersion>
     <AssemblyVersion>$(CompatRadarReleaseVersion).0</AssemblyVersion>

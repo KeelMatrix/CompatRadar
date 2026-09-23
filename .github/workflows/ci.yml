@@ -334,7 +334,7 @@ jobs:
         shell: pwsh
         run: |
           $packageDirectory = Join-Path $PWD 'artifacts/packages'
-          $expected = @('KeelMatrix.CompatRadar.0.1.0.nupkg', 'KeelMatrix.CompatRadar.0.1.0.snupkg') | Sort-Object
+          $expected = @('KeelMatrix.CompatRadar.0.1.1.nupkg', 'KeelMatrix.CompatRadar.0.1.1.snupkg') | Sort-Object
           $actual = @(Get-ChildItem -LiteralPath $packageDirectory -File | Select-Object -ExpandProperty Name | Sort-Object)
           if (($expected -join "`n") -ne ($actual -join "`n")) { throw "Unexpected package set. Expected: $($expected -join ', '); actual: $($actual -join ', ')." }
 
@@ -365,7 +365,7 @@ jobs:
 
       - name: Complete package contract inspection
         shell: pwsh
-        run: pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.0 -ExpectedCommit '${{ github.event.pull_request.head.sha || github.sha }}'
+        run: pwsh -NoProfile -File scripts/inspect-package.ps1 -PackageDirectory artifacts/packages -ExpectedVersion 0.1.1 -ExpectedCommit '${{ github.event.pull_request.head.sha || github.sha }}'
 
       - name: Upload packed tool for cross-platform consumer smoke
         uses: actions/upload-artifact@v7
@@ -374,8 +374,8 @@ jobs:
           retention-days: 1
           if-no-files-found: error
           path: |
-            artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
-            artifacts/packages/KeelMatrix.CompatRadar.0.1.0.snupkg
+            artifacts/packages/KeelMatrix.CompatRadar.0.1.1.nupkg
+            artifacts/packages/KeelMatrix.CompatRadar.0.1.1.snupkg
 
   package-consumer-smoke:
     name: Package consumer smoke / ${{ matrix.os }}
@@ -405,7 +405,7 @@ jobs:
 
       - name: Run isolated package-consumer smoke
         shell: pwsh
-        run: pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath ./artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
+        run: pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath ./artifacts/packages/KeelMatrix.CompatRadar.0.1.1.nupkg
 
       - name: Assert smoke temporary state was cleaned
         shell: pwsh
@@ -463,7 +463,7 @@ jobs:
       - name: Install freshly packed tool in an isolated path
         shell: bash
         run: |
-          dotnet tool install --tool-path "$RUNNER_TEMP/compatradar-tool" --add-source "$GITHUB_WORKSPACE/artifacts/packages" --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.0 --no-cache
+          dotnet tool install --tool-path "$RUNNER_TEMP/compatradar-tool" --add-source "$GITHUB_WORKSPACE/artifacts/packages" --configfile NuGet.config KeelMatrix.CompatRadar --version 0.1.1 --no-cache
           echo "$RUNNER_TEMP/compatradar-tool" >> "$GITHUB_PATH"
 
       - name: Create Action fixture

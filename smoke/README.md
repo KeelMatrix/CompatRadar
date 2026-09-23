@@ -12,7 +12,7 @@ Run the commands from the repository root. The prerequisites are the pinned .NET
 ```powershell
 dotnet build KeelMatrix.CompatRadar.sln -c Release
 dotnet pack src/KeelMatrix.CompatRadar/KeelMatrix.CompatRadar.csproj -c Release --no-build
-pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath artifacts/packages/KeelMatrix.CompatRadar.0.1.0.nupkg
+pwsh -NoProfile -File smoke/package-consumer-smoke.ps1 -PackagePath artifacts/packages/KeelMatrix.CompatRadar.0.1.1.nupkg
 ```
 
 ## Expected result

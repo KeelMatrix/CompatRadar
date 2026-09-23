@@ -2,7 +2,12 @@
 
 This file records user-visible changes to CompatRadar.
 
-## [Unreleased]
+## [0.1.1] - 2026-09-23
+
+### Changed
+
+* Updated the `KeelMatrix.Telemetry` package dependency to `0.1.1`.
+* Hardened the compatibility validation corpus and release checks so pinned repository checks run against the intended test and SDK/runtime setup without modifying the product working tree.
 
 ## [0.1.0] - 2026-09-15
 
