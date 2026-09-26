@@ -573,7 +573,7 @@ if ($realResults.Count -gt 0 -and -not ($realResults.Classification -contains 'C
 }
 if ($realResults.Count -gt 0) {
     $structurePath = Join-Path $witnessPackRoot 'structure.json'
-    & pwsh -NoProfile -File scripts/validate-witness-pack.ps1 -PackPath (Join-Path $witnessPackRoot 'samples') -OutputPath $structurePath 2>&1 | Out-Host
+    & pwsh -NoProfile -WindowStyle Hidden -File scripts/validate-witness-pack.ps1 -PackPath (Join-Path $witnessPackRoot 'samples') -OutputPath $structurePath 2>&1 | Out-Host
     $structureExitCode = $LASTEXITCODE
     if ($structureExitCode -ne 0) { throw "Witness-pack structural validation failed with exit code $structureExitCode." }
     $witnessPackValidation = Get-Content -LiteralPath $structurePath -Raw | ConvertFrom-Json
