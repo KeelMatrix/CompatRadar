@@ -18,6 +18,11 @@ param(
 # so a caller can keep the pinned checkouts outside the repository working tree.
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '../build/Invoke-NestedPwsh.ps1')
+& (Join-Path $PSScriptRoot '../build/Test-NestedPwshLaunch.ps1') -SelfTest
+if ($LASTEXITCODE -ne 0) { throw 'Nested PowerShell launch guard self-test failed.' }
+& (Join-Path $PSScriptRoot '../build/Test-NestedPwshLaunch.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Nested PowerShell launch guard failed.' }
 $env:KEELMATRIX_NO_TELEMETRY = '1'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $stopwatch = [Diagnostics.Stopwatch]::StartNew()
@@ -573,7 +578,7 @@ if ($realResults.Count -gt 0 -and -not ($realResults.Classification -contains 'C
 }
 if ($realResults.Count -gt 0) {
     $structurePath = Join-Path $witnessPackRoot 'structure.json'
-    & pwsh -NoProfile -WindowStyle Hidden -File scripts/validate-witness-pack.ps1 -PackPath (Join-Path $witnessPackRoot 'samples') -OutputPath $structurePath 2>&1 | Out-Host
+    Invoke-NestedPwsh -NoProfile -File scripts/validate-witness-pack.ps1 -PackPath (Join-Path $witnessPackRoot 'samples') -OutputPath $structurePath 2>&1 | Out-Host
     $structureExitCode = $LASTEXITCODE
     if ($structureExitCode -ne 0) { throw "Witness-pack structural validation failed with exit code $structureExitCode." }
     $witnessPackValidation = Get-Content -LiteralPath $structurePath -Raw | ConvertFrom-Json

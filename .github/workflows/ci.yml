@@ -61,6 +61,14 @@ jobs:
         run: |
           if ($env:KEELMATRIX_NO_TELEMETRY -ne '1') { throw 'KEELMATRIX_NO_TELEMETRY must be 1 in CI.' }
 
+      - name: Verify hidden child PowerShell launches
+        shell: pwsh
+        run: pwsh -NoProfile -File build/Test-NestedPwshLaunch.ps1 -SelfTest
+
+      - name: Verify repository child PowerShell launches
+        shell: pwsh
+        run: pwsh -NoProfile -File build/Test-NestedPwshLaunch.ps1
+
       - name: Snapshot telemetry state
         shell: pwsh
         run: |
