@@ -375,7 +375,8 @@ public sealed class PackageContractTests
             WorkingDirectory = workingDirectory,
             UseShellExecute = false,
             RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardError = true,
+            CreateNoWindow = true
         };
         foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
 

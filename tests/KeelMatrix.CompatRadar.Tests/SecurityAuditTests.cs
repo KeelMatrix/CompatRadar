@@ -74,7 +74,8 @@ public sealed class SecurityAuditTests
                 WorkingDirectory = root,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
-                RedirectStandardError = true
+                RedirectStandardError = true,
+                CreateNoWindow = true
             };
             foreach (var argument in new[]
                      {
