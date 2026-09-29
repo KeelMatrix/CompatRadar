@@ -18,6 +18,11 @@ and computed detection condition passes. It returns `2` when an environment prer
 unavailable; the generated records identify each unavailable or skipped probe. A genuine restore,
 build, test, feed, probe, or cleanup failure stays nonzero and is never recorded as a pass.
 
+The disposable Phase 0 harness sometimes retained under `_probe/` is not shipping source and has
+no tracked generator or template owner. Do not force-add files from that tree. Durable corpus
+ownership is the tracked `scripts/validation-corpus.ps1` and its tracked helpers; the launch guard
+excludes the entire ignored `_probe/` tree from the shipping-source scan.
+
 ## What the corpus proves
 
 The deterministic regression corpus contains real incompatibilities rather than injected

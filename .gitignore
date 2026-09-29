@@ -12,6 +12,7 @@ artifacts/
 compat-radar-report.json
 !tests/fixtures/v1/compat-radar-report.json
 .compat-radar/
+# Disposable Phase 0 probe evidence; it is not shipping source.
 _probe/
 secrets/
 local-telemetry/

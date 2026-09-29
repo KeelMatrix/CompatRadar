@@ -8,6 +8,11 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $helperPath = Join-Path $PSScriptRoot 'Invoke-NestedPwsh.ps1'
 $guardPath = $PSCommandPath
+$excludedPathPattern = '[\\/]((\.git)|(bin)|(obj)|(artifacts)|_probe)([\\/]|$)'
+
+function Test-ExcludedPath([string]$Path) {
+    return $Path -match $excludedPathPattern
+}
 
 function Get-ParsedCommandRecords(
     [string]$Text,
@@ -247,6 +252,15 @@ Start-Process @parameters
             throw 'The guard self-test rejected a contained C# ProcessStartInfo initializer.'
         }
 
+        $ignoredProbePath = Join-Path $repositoryRoot '_probe\harness\Program.cs'
+        $shippingSourcePath = Join-Path $repositoryRoot 'src\Program.cs'
+        if (-not (Test-ExcludedPath $ignoredProbePath)) {
+            throw 'The guard self-test did not exclude the disposable _probe tree.'
+        }
+        if (Test-ExcludedPath $shippingSourcePath) {
+            throw 'The guard self-test excluded a shipping source path.'
+        }
+
     }
     finally {
         Remove-Item -LiteralPath $selfTestRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -262,12 +276,12 @@ if (-not (Test-Path -LiteralPath $helperPath -PathType Leaf)) {
 $scriptFiles = Get-ChildItem -LiteralPath $repositoryRoot -Recurse -File -Filter '*.ps1' |
     Where-Object {
         $_.FullName -notin @($helperPath, $guardPath) -and
-        $_.FullName -notmatch '[\\/]((\.git)|(bin)|(obj)|(artifacts)|_probe[\\/]corpus)([\\/]|$)'
+        -not (Test-ExcludedPath $_.FullName)
     }
 $violations = @($scriptFiles | ForEach-Object { Get-LaunchViolations $_.FullName })
 $csharpFiles = Get-ChildItem -LiteralPath $repositoryRoot -Recurse -File -Filter '*.cs' |
     Where-Object {
-        $_.FullName -notmatch '[\\/]((\.git)|(bin)|(obj)|(artifacts)|_probe[\\/]corpus)([\\/]|$)'
+        -not (Test-ExcludedPath $_.FullName)
     }
 $violations += @($csharpFiles | ForEach-Object { Get-CSharpLaunchViolations $_.FullName })
 if ($violations.Count -gt 0) {
