@@ -9,13 +9,13 @@ CompatRadar is a local-first .NET tool. It compares an explicitly selected NuGet
 Install the tool from NuGet.org:
 
 ```bash
-dotnet tool install --global KeelMatrix.CompatRadar --version 0.1.1
+dotnet tool install --global KeelMatrix.CompatRadar --version 0.1.2
 ```
 
 Update or remove it with:
 
 ```bash
-dotnet tool update --global KeelMatrix.CompatRadar --version 0.1.1
+dotnet tool update --global KeelMatrix.CompatRadar --version 0.1.2
 dotnet tool uninstall --global KeelMatrix.CompatRadar
 ```
 
@@ -170,10 +170,10 @@ The repository includes a composite Action wrapper. Install the tool in the job,
 ```yaml
 - name: Install CompatRadar
   shell: bash
-  run: dotnet tool install --global KeelMatrix.CompatRadar --version 0.1.1
+  run: dotnet tool install --global KeelMatrix.CompatRadar --version 0.1.2
 
 - name: Check future compatibility
-  uses: KeelMatrix/CompatRadar@v0.1.1
+  uses: KeelMatrix/CompatRadar@v0.1.2
   with:
     config: compat-radar.json
     report: artifacts/compat-radar-report.json

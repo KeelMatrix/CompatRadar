@@ -395,6 +395,8 @@ public sealed class EngineTests
 
         Assert.DoesNotContain(stable.Keys, key => key.Contains("CANDIDATE", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(stable.Keys, key => key.Contains("ATTEMPT", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("1", stable["DOTNET_CLI_TELEMETRY_OPTOUT"]);
+        Assert.Equal("1", stable["KEELMATRIX_NO_TELEMETRY"]);
         Assert.Equal(stable.Keys.OrderBy(key => key, StringComparer.Ordinal), candidate.Keys.OrderBy(key => key, StringComparer.Ordinal));
         var differing = stable.Keys.Where(key => !string.Equals(stable[key], candidate[key], StringComparison.Ordinal)).ToArray();
         Assert.Equal(["NUGET_PACKAGES"], differing);

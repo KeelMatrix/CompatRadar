@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v0.1.1'
+      - 'v0.1.2'
 
 permissions:
   contents: read
@@ -29,11 +29,11 @@ jobs:
         id: version
         shell: bash
         run: |
-          if [[ "$GITHUB_REF_TYPE" != tag || "$GITHUB_REF_NAME" != 'v0.1.1' ]]; then
-            echo 'Release workflow accepts only v0.1.1.' >&2
+          if [[ "$GITHUB_REF_TYPE" != tag || "$GITHUB_REF_NAME" != 'v0.1.2' ]]; then
+            echo 'Release workflow accepts only v0.1.2.' >&2
             exit 1
           fi
-          echo 'release_version=0.1.1' >> "$GITHUB_OUTPUT"
+          echo 'release_version=0.1.2' >> "$GITHUB_OUTPUT"
 
       - name: Validate changelog and version contract
         shell: pwsh
@@ -96,8 +96,8 @@ jobs:
           retention-days: 1
           if-no-files-found: error
           path: |
-            artifacts/packages/KeelMatrix.CompatRadar.0.1.1.nupkg
-            artifacts/packages/KeelMatrix.CompatRadar.0.1.1.snupkg
+            artifacts/packages/KeelMatrix.CompatRadar.0.1.2.nupkg
+            artifacts/packages/KeelMatrix.CompatRadar.0.1.2.snupkg
 
   publish:
     name: Publish validated release
@@ -125,8 +125,8 @@ jobs:
         env:
           NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         run: |
-          $nupkg = Join-Path $PWD 'artifacts/packages/KeelMatrix.CompatRadar.0.1.1.nupkg'
-          $snupkg = Join-Path $PWD 'artifacts/packages/KeelMatrix.CompatRadar.0.1.1.snupkg'
+          $nupkg = Join-Path $PWD 'artifacts/packages/KeelMatrix.CompatRadar.0.1.2.nupkg'
+          $snupkg = Join-Path $PWD 'artifacts/packages/KeelMatrix.CompatRadar.0.1.2.snupkg'
           if (-not (Test-Path -LiteralPath $nupkg) -or -not (Test-Path -LiteralPath $snupkg)) { throw 'Validated package artifacts are missing.' }
           dotnet nuget push $nupkg --source https://api.nuget.org/v3/index.json --api-key $env:NUGET_API_KEY --no-symbols
           if ($LASTEXITCODE -ne 0) { throw 'Primary package publication failed; symbol publication was not attempted.' }

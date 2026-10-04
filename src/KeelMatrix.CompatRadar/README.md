@@ -4,16 +4,16 @@ CompatRadar is a .NET global or local tool for .NET maintainers who need to test
 
 ## Install
 
-Install version `0.1.1` globally:
+Install version `0.1.2` globally:
 
 ```bash
-dotnet tool install --global KeelMatrix.CompatRadar --version 0.1.1
+dotnet tool install --global KeelMatrix.CompatRadar --version 0.1.2
 ```
 
 Update it with:
 
 ```bash
-dotnet tool update --global KeelMatrix.CompatRadar --version 0.1.1
+dotnet tool update --global KeelMatrix.CompatRadar --version 0.1.2
 ```
 
 Remove it with:

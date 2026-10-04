@@ -2,6 +2,12 @@
 
 This file records user-visible changes to CompatRadar.
 
+## [0.1.2] - 2026-10-04
+
+### Changed
+
+* Use shared telemetry handling for process opt-out and best-effort event requests.
+
 ## [0.1.1] - 2026-09-23
 
 ### Changed

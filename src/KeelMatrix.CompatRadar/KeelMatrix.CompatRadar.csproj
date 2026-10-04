@@ -11,7 +11,7 @@
     <RootNamespace>KeelMatrix.CompatRadar</RootNamespace>
     <Description>Test your .NET repository against future SDK/runtime and NuGet candidates, confirm real breakage, and localize the first bad candidate before normal upgrade time.</Description>
     <PackageTags>dotnet;dependencies;compatibility;ci;nuget;prerelease;sdk;runtime;regression-testing;dotnet-tool</PackageTags>
-    <PackageReleaseNotes>Updated the KeelMatrix.Telemetry dependency to 0.1.1.</PackageReleaseNotes>
+    <PackageReleaseNotes>Use shared KeelMatrix.Telemetry process opt-out and best-effort event handling.</PackageReleaseNotes>
     <PackageOutputPath>$(MSBuildProjectDirectory)\..\..\artifacts\packages\</PackageOutputPath>
   </PropertyGroup>
 

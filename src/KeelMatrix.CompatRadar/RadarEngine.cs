@@ -486,6 +486,8 @@ internal sealed class RadarEngine
             ["NUGET_PACKAGES"] = Path.Combine(materializedRoot, ".packages"),
             ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
             ["DOTNET_NOLOGO"] = "1",
+            // The validation command runs arbitrary analyzed repository code; keep its telemetry
+            // out of CompatRadar's own process-level product telemetry.
             ["KEELMATRIX_NO_TELEMETRY"] = "1",
             // Stable and candidate states must never share cross-run build state: a reused
             // MSBuild node or build server keeps task assemblies from the SDK that started it,

@@ -38,21 +38,9 @@ internal sealed class SharedTelemetryReporter : IUsageTelemetry
 
     public void RecordTrustworthyComparison()
     {
-        try
-        {
-            if (string.Equals(Environment.GetEnvironmentVariable("KEELMATRIX_NO_TELEMETRY"), "1", StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            client ??= new Client("compatradar", typeof(Program));
-            client.TrackActivation();
-            client.TrackHeartbeat();
-        }
-        catch
-        {
-            // Telemetry is best-effort and must never affect an analysis.
-        }
+        client ??= new Client("compatradar", typeof(Program));
+        client.TrackActivation();
+        client.TrackHeartbeat();
     }
 }
 

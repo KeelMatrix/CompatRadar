@@ -11,9 +11,9 @@ public sealed class ReleaseContractTests
         var validation = workflow[..publishStart];
         var publication = workflow[publishStart..];
 
-        Assert.Contains("- 'v0.1.1'", workflow, StringComparison.Ordinal);
+        Assert.Contains("- 'v0.1.2'", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("- 'v*'", workflow, StringComparison.Ordinal);
-        Assert.Contains("$GITHUB_REF_NAME\" != 'v0.1.1'", validation, StringComparison.Ordinal);
+        Assert.Contains("$GITHUB_REF_NAME\" != 'v0.1.2'", validation, StringComparison.Ordinal);
         Assert.DoesNotContain("vX.Y.Z", workflow, StringComparison.Ordinal);
 
         Assert.Equal(1, Count(workflow, "id-token: write"));
@@ -40,10 +40,10 @@ public sealed class ReleaseContractTests
         Assert.Equal(1, Count(publication, "dotnet nuget push $nupkg"));
         Assert.Equal(1, Count(publication, "dotnet nuget push $snupkg"));
         Assert.Contains("--no-symbols", publication, StringComparison.Ordinal);
-        Assert.Equal(1, Count(validation, "KeelMatrix.CompatRadar.0.1.1.nupkg"));
-        Assert.Equal(1, Count(validation, "KeelMatrix.CompatRadar.0.1.1.snupkg"));
-        Assert.Equal(1, Count(publication, "KeelMatrix.CompatRadar.0.1.1.nupkg"));
-        Assert.Equal(1, Count(publication, "KeelMatrix.CompatRadar.0.1.1.snupkg"));
+        Assert.Equal(1, Count(validation, "KeelMatrix.CompatRadar.0.1.2.nupkg"));
+        Assert.Equal(1, Count(validation, "KeelMatrix.CompatRadar.0.1.2.snupkg"));
+        Assert.Equal(1, Count(publication, "KeelMatrix.CompatRadar.0.1.2.nupkg"));
+        Assert.Equal(1, Count(publication, "KeelMatrix.CompatRadar.0.1.2.snupkg"));
     }
 
     private static int Count(string text, string value)
