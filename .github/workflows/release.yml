@@ -46,6 +46,10 @@ jobs:
         with:
           dotnet-version: 8.0.424
 
+      - name: Validate website catalog package metadata
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/Test-WebsiteCatalogContract.ps1 -RepositoryPath $PWD
+
       - name: Verify telemetry suppression
         shell: pwsh
         run: if ($env:KEELMATRIX_NO_TELEMETRY -ne '1') { throw 'Telemetry must be disabled for release validation.' }

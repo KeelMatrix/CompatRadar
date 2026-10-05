@@ -18,6 +18,7 @@ Install the pinned .NET 8 SDK from `global.json`, then run:
 ```powershell
 $env:KEELMATRIX_NO_TELEMETRY = '1'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+pwsh -NoProfile -File scripts/Test-WebsiteCatalogContract.ps1
 dotnet restore KeelMatrix.CompatRadar.sln --configfile NuGet.config
 dotnet build KeelMatrix.CompatRadar.sln -c Release --no-restore -warnaserror
 dotnet test KeelMatrix.CompatRadar.sln -c Release --no-build --no-restore

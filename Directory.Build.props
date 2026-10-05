@@ -19,7 +19,7 @@
     <NuGetAudit>false</NuGetAudit>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/KeelMatrix/CompatRadar</RepositoryUrl>
-    <PackageProjectUrl>https://github.com/KeelMatrix/CompatRadar#readme</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/KeelMatrix/CompatRadar</PackageProjectUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>icon.png</PackageIcon>

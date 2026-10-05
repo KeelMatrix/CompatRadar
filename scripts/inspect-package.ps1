@@ -139,9 +139,24 @@ try {
     foreach ($tag in @('dotnet', 'runtime', 'nuget', 'compatibility', 'regression-testing')) {
         if (-not ([string]$metadata.tags).Split(' ', [StringSplitOptions]::RemoveEmptyEntries).Contains($tag)) { throw "Required package tag '$tag' is missing." }
     }
+    $packageTags = @([regex]::Split([string]$metadata.tags, '[;\s]+') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    foreach ($sentinel in @('keelmatrix-public-product', 'keelmatrix-internal-package', 'keelmatrix-primary', 'keelmatrix-component')) {
+        $matches = @($packageTags | Where-Object { [string]::Equals($_, $sentinel, [StringComparison]::OrdinalIgnoreCase) })
+        if ($matches.Count -gt 1) { throw "Package metadata contains multiple website classification tags from the '$sentinel' group." }
+    }
+    foreach ($sentinel in @('keelmatrix-public-product', 'keelmatrix-primary')) {
+        $matches = @($packageTags | Where-Object { [string]::Equals($_, $sentinel, [StringComparison]::OrdinalIgnoreCase) })
+        if ($matches.Count -ne 1 -or -not [string]::Equals($matches[0], $sentinel, [StringComparison]::Ordinal)) { throw "Package metadata must contain exactly the lowercase website sentinel '$sentinel'." }
+    }
+    foreach ($sentinel in @('keelmatrix-internal-package', 'keelmatrix-component')) {
+        if (@($packageTags | Where-Object { [string]::Equals($_, $sentinel, [StringComparison]::OrdinalIgnoreCase) }).Count -ne 0) { throw "Package metadata contains conflicting website sentinel '$sentinel'." }
+    }
+    if ($metadata.projectUrl -cne 'https://github.com/KeelMatrix/CompatRadar') { throw 'Project URL metadata mismatch.' }
     $repository = $metadata.repository
-    if ($repository.url -ne 'https://github.com/KeelMatrix/CompatRadar') { throw 'Repository URL metadata mismatch.' }
+    if ($repository.url -cne 'https://github.com/KeelMatrix/CompatRadar' -or $repository.type -cne 'git') { throw 'Repository URL/type metadata mismatch.' }
     if (-not [string]::IsNullOrWhiteSpace($ExpectedCommit) -and $repository.commit -ne $ExpectedCommit) { throw 'Repository commit metadata mismatch.' }
+    $packageTypes = @($metadata.SelectNodes("./*[local-name()='packageTypes']/*[local-name()='packageType']"))
+    if ($packageTypes.Count -ne 1 -or $packageTypes[0].GetAttribute('name') -cne 'DotnetTool') { throw 'Package type metadata mismatch; expected DotnetTool.' }
     $dependency = @($metadata.dependencies.group.dependency | Where-Object { $_.id -eq 'KeelMatrix.Telemetry' })
     $bundledTelemetry = $null -ne $nupkg.GetEntry('tools/net8.0/any/KeelMatrix.Telemetry.dll')
     if ($dependency.Count -ne 1 -and -not $bundledTelemetry) { throw 'KeelMatrix.Telemetry is neither a declared dependency nor a bundled runtime asset.' }
